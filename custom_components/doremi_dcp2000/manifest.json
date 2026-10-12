@@ -1,12 +1,12 @@
 {
   "domain": "doremi_dcp2000",
   "name": "Doremi DCP-2000",
-  "codeowners": [],
+  "codeowners": ["@Haraldbbag"],
   "config_flow": true,
-  "documentation": "https://github.com/EUER-KONTO/ha-doremi-dcp2000",
+  "documentation": "https://github.com/Haraldbbag/ha_dcp2000",
   "integration_type": "device",
   "iot_class": "local_polling",
-  "issue_tracker": "https://github.com/EUER-KONTO/ha-doremi-dcp2000/issues",
+  "issue_tracker": "https://github.com/Haraldbbag/ha_dcp2000/issues",
   "requirements": [],
   "version": "0.1.0"
 }

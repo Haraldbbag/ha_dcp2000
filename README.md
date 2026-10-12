@@ -8,12 +8,10 @@ Home-Assistant-Instanz.
 
 ### Über HACS (empfohlen bei mehreren HA-Instanzen)
 
-1. Diesen Ordner als eigenes Git-Repository ablegen (GitHub, Gitea, …) und in
-   `custom_components/doremi_dcp2000/manifest.json` die Links `documentation`
-   und `issue_tracker` anpassen.
-2. In jeder HA-Instanz: **HACS → ⋮ → Benutzerdefinierte Repositories** →
-   Repository-URL, Typ *Integration* → herunterladen → HA neu starten.
-3. Updates verteilt ihr danach zentral: `version` im Manifest erhöhen, Release
+1. In jeder HA-Instanz: **HACS → ⋮ → Benutzerdefinierte Repositories** →
+   `https://github.com/Haraldbbag/ha_dcp2000`, Typ *Integration* →
+   herunterladen → HA neu starten.
+2. Updates verteilt ihr danach zentral: `version` im Manifest erhöhen, Release
    taggen, HACS bietet das Update in allen Instanzen an.
 
 ### Manuell
