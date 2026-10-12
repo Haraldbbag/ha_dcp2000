@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from homeassistant.components.frontend import add_extra_js_url
@@ -26,6 +27,7 @@ PLATFORMS = [
     Platform.SWITCH,
 ]
 
+_LOGGER = logging.getLogger(__name__)
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 CARD_URL = "/doremi_dcp2000/doremi-dcp2000-card.js"
 
@@ -35,8 +37,32 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     version = (await async_get_integration(hass, DOMAIN)).version
     path = Path(__file__).parent / "frontend" / "doremi-dcp2000-card.js"
     await hass.http.async_register_static_paths([StaticPathConfig(CARD_URL, str(path), False)])
-    add_extra_js_url(hass, f"{CARD_URL}?v={version}")
+    url = f"{CARD_URL}?v={version}"
+    add_extra_js_url(hass, url)
+    # Also as a dashboard resource: loaded by every dashboard on open, independent
+    # of a cached start page (seen with Firefox).
+    try:
+        await _async_register_resource(hass, url)
+    except Exception as err:  # noqa: BLE001 - never block setup over the card
+        _LOGGER.warning("Could not register the dashboard card as resource: %s", err)
     return True
+
+
+async def _async_register_resource(hass: HomeAssistant, url: str) -> None:
+    data = hass.data.get("lovelace")
+    resources = getattr(data, "resources", None)
+    if resources is None or getattr(data, "resource_mode", "storage") != "storage":
+        return  # YAML resources: the user manages them
+    if not getattr(resources, "loaded", True):
+        await resources.async_load()
+        resources.loaded = True
+    base = url.split("?", 1)[0]
+    for item in resources.async_items():
+        if item.get("url", "").split("?", 1)[0] == base:
+            if item["url"] != url:
+                await resources.async_update_item(item["id"], {"res_type": "module", "url": url})
+            return
+    await resources.async_create_item({"res_type": "module", "url": url})
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: DCPConfigEntry) -> bool:

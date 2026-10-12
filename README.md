@@ -66,8 +66,9 @@ erkannt; doppelte Einrichtung wird abgelehnt. IP-Wechsel: **⋮ → Neu konfigur
 
 ## Dashboard-Karte
 
-Die Integration bringt eine eigene Karte mit und lädt sie automatisch in jedes
-Dashboard; eine Ressource muss nicht eingetragen werden.
+Die Integration bringt eine eigene Karte mit und trägt sie selbst als
+Dashboard-Ressource ein (bei Ressourcen im YAML-Modus bitte
+`/doremi_dcp2000/doremi-dcp2000-card.js` als Modul eintragen).
 
 ```yaml
 type: custom:doremi-dcp2000-card
