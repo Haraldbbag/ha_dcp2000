@@ -198,22 +198,31 @@ class DCP2000Client:
         if start_frame:
             await self.locate(start_frame)
 
-    async def locate(self, frame: int, timeout: float = 5.0) -> bool:
-        """Locate and confirm via timecode; repeats the locate the server ignores
-        during the first seconds after a clip has been cued."""
-        before = await self.timecode_parts()
+    async def locate(self, frame: int, timeout: float = 10.0) -> bool:
+        """Locate and confirm via timecode.
+
+        Right after a clip has been (re)cued the server ignores locates and may
+        still reset to the in point, so repeat until the timecode shows the
+        target frame (for any standard rate, ±2 frames) twice in a row.
+        """
         loop = asyncio.get_running_loop()
         deadline = loop.time() + timeout
-        while True:
+        while loop.time() < deadline:
             await self.set_frame(frame)
+            hits = 0
             for _ in range(5):
-                await asyncio.sleep(0.2)
-                now = await self.timecode_parts()
-                if now is not None and now != before:
-                    return True
-            if loop.time() > deadline:
-                _LOGGER.debug("Locate to %s not confirmed", frame)
-                return False
+                await asyncio.sleep(0.25)
+                tc = await self.timecode_parts()
+                if tc is not None and any(
+                    abs(p.timecode_to_frames(tc, r) - frame) <= 2 for r in p.STANDARD_RATES
+                ):
+                    hits += 1
+                    if hits >= 2:
+                        return True
+                else:
+                    hits = 0
+        _LOGGER.debug("Locate to %s not confirmed", frame)
+        return False
 
     async def measure_fps(self, last_frame: int | None = None) -> int | None:
         """Find the edit rate by locating to a probe frame and reading the timecode.
