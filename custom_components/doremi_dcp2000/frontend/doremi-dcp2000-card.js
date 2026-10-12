@@ -5,7 +5,7 @@
  *   type: custom:doremi-dcp2000-card
  *   entity: media_player.dcp_2000
  */
-const CARD_VERSION = "0.7.1";
+const CARD_VERSION = "0.7.2";
 
 const TEXT = {
   de: {
@@ -367,7 +367,9 @@ class DoremiDcp2000Card extends HTMLElement {
         type: "call_service", domain, service, service_data: data,
         target: { entity_id: this._config.entity }, return_response: returnResponse,
       });
-      return res?.response;
+      const resp = res?.response;
+      // entity services answer {entity_id: data}
+      return resp && this._config.entity in resp ? resp[this._config.entity] : resp;
     } catch (err) {
       this.$("error").textContent = err?.message || String(err);
       throw err;
