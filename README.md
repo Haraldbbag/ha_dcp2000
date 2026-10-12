@@ -139,8 +139,10 @@ actions:
 **Show-Playlists:** SPLs können Automation-Cues enthalten (z. B. Licht,
 Projektorlampe, Format). Diese werden beim Abspielen ausgeführt – auch wenn
 über Home Assistant gestartet. Mit `spl_retrieve` lässt sich das XML vorher
-prüfen. Der erste Start einer SPL wird erst nach den Sicherheitsprüfungen des
-Servers bestätigt; die Integration wartet darauf bis zu 90 s und zeigt solange
+prüfen. Der erste `PlaySPL` nach dem Laden führt beim DCP-2000 nur die
+Sicherheitsprüfungen aus und parkt die Show in Pause am Anfang; die Integration
+schickt dann automatisch ein zweites `PlaySPL` (gilt für Media-Player-Play,
+Button und `spl_command`). Sie wartet bis zu 90 s und zeigt solange
 „Startet …“. Befehle werden nach einem Timeout nie automatisch wiederholt.
 
 ## Protokoll-Hinweise

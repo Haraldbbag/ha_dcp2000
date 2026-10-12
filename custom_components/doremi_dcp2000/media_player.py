@@ -222,6 +222,10 @@ class DCPMediaPlayer(DCPEntity, MediaPlayerEntity):
     # -- transport ----------------------------------------------------------
 
     async def async_media_play(self) -> None:
+        d = self.coordinator.data
+        if self.coordinator.klv and d.spl and d.spl.spl_uuid and d.spl.state != "playing":
+            await self._run(self.coordinator.async_spl_play())
+            return
         await self._run(self.coordinator.client.play(), refresh=False)
         self.coordinator.mark_start_requested()
         await self.coordinator.async_request_refresh()
@@ -341,9 +345,7 @@ class DCPMediaPlayer(DCPEntity, MediaPlayerEntity):
         await self._run(actions[command]())
 
     async def _spl_play(self, klv):
-        # The server answers PlaySPL only after its pre-show checks (up to ~30 s).
-        self.coordinator.mark_start_requested()
-        return await klv.simple("PlaySPL")
+        return await self.coordinator.async_spl_play()
 
     async def async_spl_jump(self, seconds: int) -> None:
         await self._run(self._require_klv().jump(seconds))

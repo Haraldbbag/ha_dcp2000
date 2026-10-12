@@ -391,13 +391,33 @@ class DCPCoordinator(DataUpdateCoordinator[DCPData]):
             data.starting = False
             return
         waited = time.monotonic() - self._start_requested
-        if data.status.playing or data.status.ejected:
+        spl_loaded = bool(data.spl and data.spl.spl_uuid)
+        if data.status.playing or (data.status.ejected and not spl_loaded):
             self._start_requested = None
         elif waited > START_TIMEOUT:
             _LOGGER.warning("%s did not start playback within %d s (status %s)",
                             self.client.host, START_TIMEOUT, data.status.raw.hex(" "))
             self._start_requested = None
         data.starting = self._start_requested is not None
+
+    async def async_spl_play(self) -> None:
+        """Start the loaded SPL.
+
+        On the DCP-2000 the first PlaySPL after loading only runs the pre-show
+        checks and parks the show paused at its start; a second PlaySPL starts
+        it. Send the second one automatically in that case.
+        """
+        klv = self.klv
+        if klv is None:
+            raise DCPCommandError("KLV API not enabled")
+        before = await klv.status_spl()
+        self.mark_start_requested()
+        await klv.simple("PlaySPL")
+        after = await klv.status_spl()
+        if before.state != "paused" and after.state == "paused":
+            _LOGGER.debug("SPL parked after checks, sending PlaySPL again")
+            await klv.simple("PlaySPL")
+        await self.async_request_refresh()
 
     async def async_refresh_library(self) -> None:
         self._library_at = 0.0

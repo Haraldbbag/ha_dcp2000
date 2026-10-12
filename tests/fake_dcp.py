@@ -47,6 +47,7 @@ class State:
         self.list_pos = 0
         self.ejected = False
         self.klv_log: list[str] = []
+        self.spl_state = 1  # 1 stop, 2 play, 3 pause
         self.log: list[str] = []
 
     def tick(self) -> None:
@@ -218,6 +219,12 @@ async def serve_klv(st: State, reader, writer) -> None:
             st.klv_log.append(name)
             if name == "PlaySPL":
                 await asyncio.sleep(PLAY_DELAY)  # real server: pre-show checks first
+                # DCP-2000: first PlaySPL after loading parks the show paused
+                st.spl_state = 3 if st.spl_state == 1 else 2
+            elif name == "PauseSPL":
+                st.spl_state = 3
+            elif name in ("LoadSPL", "LoadSPLbyUUID", "EjectSPL"):
+                st.spl_state = 1
             if name == "GetCPLList":
                 out = rid + batch([c[1].bytes for c in CLIPS.values()]) + ok
             elif name == "GetSPLList":
@@ -237,7 +244,7 @@ async def serve_klv(st: State, reader, writer) -> None:
                        + b"\x00\x03\x06\x18\x00" + batch([]) + ok)
             elif name == "StatusSPL":
                 cpl = CLIPS[st.clip][1].bytes if st.clip else b"\x00" * 16
-                out = (rid + bytes([2 if st.playing else 3]) + spl.bytes
+                out = (rid + bytes([st.spl_state]) + spl.bytes
                        + struct.pack(">II", 2268, 5400) + cpl + b"\x00" * 32
                        + struct.pack(">II", 10, 100) + ok)
             elif name == "RetrSPL":

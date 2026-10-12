@@ -24,8 +24,7 @@ class DCPButtonDescription(ButtonEntityDescription):
 
 
 async def _spl_play(c: DCPCoordinator) -> None:
-    c.mark_start_requested()
-    await c.klv.simple("PlaySPL")
+    await c.async_spl_play()
 
 
 BUTTONS: tuple[DCPButtonDescription, ...] = (
