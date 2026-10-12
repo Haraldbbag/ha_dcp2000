@@ -108,7 +108,8 @@ async def _steps(st):
         spl = await k.status_spl()
         assert spl.spl_uuid.startswith("99999999") and spl.spl_percent == 42
         assert spl.cpl_uuid is not None
-        assert await k.get_spl_list() == [spl.spl_uuid]
+        assert (await k.get_spl_list())[0] == spl.spl_uuid
+        assert (await k.get_spl_info(spl.spl_uuid))["title"] == "Abendvorstellung"
         await k.simple("PlaySPL")
         assert (await k.retrieve_spl(spl.spl_uuid)).startswith("<ShowPlaylist>")
         await k.jump(-180)

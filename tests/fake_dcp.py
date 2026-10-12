@@ -199,6 +199,7 @@ def batch(items: list[bytes]) -> bytes:
 
 async def serve_klv(st: State, reader, writer) -> None:
     spl = uuid.UUID("99999999-8888-7777-6666-555555555555")
+    spl2 = uuid.UUID("12121212-3434-5656-7878-909090909090")
     by_uuid = {c[1]: (k, c) for k, c in CLIPS.items()}
     try:
         while True:
@@ -215,7 +216,11 @@ async def serve_klv(st: State, reader, writer) -> None:
             if name == "GetCPLList":
                 out = rid + batch([c[1].bytes for c in CLIPS.values()]) + ok
             elif name == "GetSPLList":
-                out = rid + batch([spl.bytes]) + ok
+                out = rid + batch([spl.bytes, spl2.bytes]) + ok
+            elif name == "GetSPLInfo":
+                su = value[4:20]
+                title = {spl.bytes: "Abendvorstellung", spl2.bytes: "Matinee"}[su]
+                out = rid + su + title.encode().ljust(128, b"\x00") + (5400 * 24).to_bytes(4, "big") + ok
             elif name == "GetKDMList":
                 out = rid + batch([]) + ok
             elif name == "GetCPLInfo":
@@ -237,7 +242,7 @@ async def serve_klv(st: State, reader, writer) -> None:
             elif name == "GetProductInfo":
                 out = (rid + b"DCP2000".ljust(16, b"\x00") + b"123456".ljust(16, b"\x00")
                        + uuid.uuid4().bytes + bytes([4, 2, 1, 0, 1, 0, 0, 7]) + ok)
-            elif name == "LoadSPLbyUUID" and value[4:20] != spl.bytes:
+            elif name == "LoadSPLbyUUID" and value[4:20] not in (spl.bytes, spl2.bytes):
                 out = rid + b"\x01"  # failed
             else:
                 out = rid + ok

@@ -45,6 +45,7 @@ class DCPData:
     gpi: int | None = None
     spl: p.SplStatus | None = None
     clips: dict[str, bytes] = field(default_factory=dict)
+    spls: dict[str, str] = field(default_factory=dict)  # label -> SPL UUID
     position_updated_at: datetime | None = None
     starting: bool = False
 
@@ -118,10 +119,18 @@ class DCPCoordinator(DataUpdateCoordinator[DCPData]):
         # Per-clip knowledge that survives restarts: {clip_id: {title, fps, fps_source}}
         self._store: Store[dict] = Store(hass, 1, f"{DOMAIN}.{entry.entry_id}")
         self._cache: dict[str, dict] = {}
+        self._spl_cache: dict[str, dict] = {}  # uuid -> {title, frames}
         self.data = DCPData(fps=self.default_fps)
 
     async def async_load_cache(self) -> None:
-        self._cache = (await self._store.async_load() or {}).get("clips", {})
+        stored = await self._store.async_load() or {}
+        self._cache = stored.get("clips", {})
+        self._spl_cache = stored.get("spls", {})
+
+    def _save(self) -> None:
+        self._store.async_delay_save(
+            lambda: {"clips": self._cache, "spls": self._spl_cache}, 10
+        )
 
     def _remember(self, clip: bytes, **values) -> None:
         key = p.clip_id_to_str(clip)
@@ -129,7 +138,7 @@ class DCPCoordinator(DataUpdateCoordinator[DCPData]):
         if all(entry.get(k) == v for k, v in values.items()):
             return
         entry.update(values)
-        self._store.async_delay_save(lambda: {"clips": self._cache}, 10)
+        self._save()
 
     async def async_shutdown(self) -> None:
         await super().async_shutdown()
@@ -238,12 +247,61 @@ class DCPCoordinator(DataUpdateCoordinator[DCPData]):
             clips = []
         if self.klv:
             await self._enrich_from_klv(clips)
+            await self._refresh_spls(data)
         names: dict[str, bytes] = {}
         for clip in clips:
             title = await self._clip_title(clip)
             names[clip_label(clip, title)] = clip
         data.clips = names
         self._library_at = time.monotonic()
+
+    async def _refresh_spls(self, data: DCPData) -> None:
+        """Show playlists with their titles (GetSPLList + GetSPLInfo, cached)."""
+        try:
+            uuids = await self.klv.get_spl_list()
+        except DCPError as err:
+            _LOGGER.debug("GetSPLList failed: %s", err)
+            return
+        changed = False
+        for uuid in uuids:
+            if uuid in self._spl_cache:
+                continue
+            try:
+                info = await self.klv.get_spl_info(uuid)
+            except DCPError as err:
+                _LOGGER.debug("GetSPLInfo %s failed: %s", uuid, err)
+                continue
+            self._spl_cache[uuid] = {"title": info["title"], "frames": info["duration_frames"]}
+            changed = True
+        for gone in set(self._spl_cache) - set(uuids):
+            del self._spl_cache[gone]
+            changed = True
+        if changed:
+            self._save()
+        labels: dict[str, str] = {}
+        titles = [self._spl_cache.get(u, {}).get("title") or u for u in uuids]
+        for uuid, title in zip(uuids, titles):
+            label = title if titles.count(title) == 1 else f"{title} ({uuid[:8]})"
+            labels[label] = uuid
+        data.spls = dict(sorted(labels.items(), key=lambda kv: kv[0].lower()))
+
+    def spl_by_name(self, name: str) -> str:
+        """Accept an SPL label, title or UUID."""
+        spls = self.data.spls if self.data else {}
+        if name in spls:
+            return spls[name]
+        for label, uuid in spls.items():
+            if self._spl_cache.get(uuid, {}).get("title") == name:
+                return uuid
+        return name.removeprefix("urn:uuid:")
+
+    def spl_label(self, uuid: str | None) -> str | None:
+        if not uuid or not self.data:
+            return None
+        for label, value in self.data.spls.items():
+            if value == uuid:
+                return label
+        return self._spl_cache.get(uuid, {}).get("title") or uuid
 
     async def _enrich_from_klv(self, clips: list[bytes]) -> None:
         """Exact edit rate, title and kind for every CPL via GetCPLInfo."""

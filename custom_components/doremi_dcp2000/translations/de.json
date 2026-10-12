@@ -157,6 +157,11 @@
       "measure_fps": {
         "name": "Bildrate messen"
       }
+    },
+    "select": {
+      "spl": {
+        "name": "Show-Playlist"
+      }
     }
   },
   "selector": {
@@ -262,8 +267,8 @@
           "description": "Speichern (StoreSPL) statt zum Abspielen laden."
         },
         "spl_uuid": {
-          "name": "SPL-UUID",
-          "description": "Gespeicherte SPL per UUID laden (statt XML)."
+          "name": "SPL",
+          "description": "Name oder UUID einer gespeicherten SPL (statt XML)."
         }
       }
     },

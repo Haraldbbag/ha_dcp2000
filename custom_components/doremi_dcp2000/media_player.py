@@ -213,6 +213,7 @@ class DCPMediaPlayer(DCPEntity, MediaPlayerEntity):
         if d.spl:
             attrs |= {
                 "spl_uuid": d.spl.spl_uuid,
+                "spl_title": self.coordinator.spl_label(d.spl.spl_uuid),
                 "spl_state": d.spl.state,
                 "spl_progress": d.spl.spl_percent,
             }
@@ -318,8 +319,8 @@ class DCPMediaPlayer(DCPEntity, MediaPlayerEntity):
         self, xml: str | None = None, spl_uuid: str | None = None, store: bool = False
     ) -> None:
         klv = self._require_klv()
-        if spl_uuid:
-            await self._run(klv.load_spl_uuid(spl_uuid))
+        if spl_uuid:  # UUID, title or select-list label
+            await self._run(klv.load_spl_uuid(self.coordinator.spl_by_name(spl_uuid)))
         elif xml:
             await self._run(klv.store_spl(xml) if store else klv.load_spl(xml))
         else:

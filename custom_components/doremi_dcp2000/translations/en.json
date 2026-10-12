@@ -157,6 +157,11 @@
       "measure_fps": {
         "name": "Measure frame rate"
       }
+    },
+    "select": {
+      "spl": {
+        "name": "Show playlist"
+      }
     }
   },
   "selector": {
@@ -262,8 +267,8 @@
           "description": "Store (ingest) instead of loading for playback."
         },
         "spl_uuid": {
-          "name": "SPL UUID",
-          "description": "Load a stored SPL by UUID (instead of XML)."
+          "name": "SPL",
+          "description": "Title or UUID of a stored SPL (instead of XML)."
         }
       }
     },

@@ -73,6 +73,11 @@
       "gpo": {
         "default": "mdi:electric-switch-closed"
       }
+    },
+    "select": {
+      "spl": {
+        "default": "mdi:playlist-play"
+      }
     }
   },
   "services": {

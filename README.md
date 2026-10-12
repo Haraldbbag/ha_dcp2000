@@ -53,6 +53,9 @@ erkannt; doppelte Einrichtung wird abgelehnt. IP-Wechsel: **⋮ → Neu konfigur
 - **Buttons** – Dowser öffnen/schließen, Projektor an/aus (generische
   Projektorbefehle `43.C8.80…` über den Server), Frame zurück, Bibliothek
   aktualisieren; mit KLV: SPL abspielen/pausieren/auswerfen.
+- **Auswahl „Show-Playlist“** (mit KLV-API) – alle auf dem Server gespeicherten
+  SPLs mit Namen, alphabetisch. Auswahl lädt die SPL (Bild bleibt schwarz bis
+  Play); zeigt die aktuell geladene SPL an.
 - **Binärsensoren** – Verbunden; GPI 1–8 (Option).
 - **Schalter** – GPO 1–8 (Option). Der Server meldet Ausgänge nicht zurück,
   daher „angenommener Zustand“, der letzte Wert wird nach Neustart wiederhergestellt.
@@ -93,7 +96,7 @@ response_variable: inhalte
 ```
 
 Weitere: `set_frame`, `step_back`, `set_gpo` (ganzes Byte), sowie mit KLV
-`spl_load` (XML laden oder speichern), `spl_command`
+`spl_load` (gespeicherte SPL per Name/UUID laden, oder XML laden/speichern), `spl_command`
 (play/pause/eject/skip/loop), `spl_jump`, `spl_retrieve`.
 
 Beispiel-Automation: Dowser schließen, wenn der Film zu Ende ist
