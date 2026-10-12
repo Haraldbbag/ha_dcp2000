@@ -254,7 +254,7 @@ class DCPMediaPlayer(DCPEntity, MediaPlayerEntity):
             except DCPError as err:
                 _LOGGER.debug("Frame rate measurement skipped: %s", err)
             if start_frame:
-                await client.set_frame(start_frame)
+                await client.locate(start_frame)
             if autoplay:
                 await client.play()
                 self.coordinator.mark_start_requested()

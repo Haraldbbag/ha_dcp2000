@@ -196,7 +196,24 @@ class DCP2000Client:
             if loop.time() > deadline:
                 raise DCPCommandError(f"timeout loading clip {p.clip_id_to_str(clip_id)!r}")
         if start_frame:
-            await self.set_frame(start_frame)
+            await self.locate(start_frame)
+
+    async def locate(self, frame: int, timeout: float = 5.0) -> bool:
+        """Locate and confirm via timecode; repeats the locate the server ignores
+        during the first seconds after a clip has been cued."""
+        before = await self.timecode_parts()
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout
+        while True:
+            await self.set_frame(frame)
+            for _ in range(5):
+                await asyncio.sleep(0.2)
+                now = await self.timecode_parts()
+                if now is not None and now != before:
+                    return True
+            if loop.time() > deadline:
+                _LOGGER.debug("Locate to %s not confirmed", frame)
+                return False
 
     async def measure_fps(self, last_frame: int | None = None) -> int | None:
         """Find the edit rate by locating to a probe frame and reading the timecode.
