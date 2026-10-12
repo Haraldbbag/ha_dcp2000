@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 import logging
@@ -281,7 +282,9 @@ class DCPCoordinator(DataUpdateCoordinator[DCPData]):
         self._titles.clear()
         await self.async_request_refresh()
 
-    async def async_measure_fps(self, force: bool = True) -> int | None:
+    async def async_measure_fps(
+        self, force: bool = True, delays: tuple[float, ...] = (0.0,)
+    ) -> int | None:
         """Measure the edit rate of the loaded clip (not while playing).
 
         With force=False a clip whose rate is already measured/known is skipped.
@@ -295,7 +298,14 @@ class DCPCoordinator(DataUpdateCoordinator[DCPData]):
             return int(cached["fps"])
         if (await c.status()).state == "playing":
             raise DCPCommandError("frame rate can only be measured while paused/cued")
-        rate = await c.measure_fps(await c.last_frame())
+        last = await c.last_frame()
+        rate = None
+        for delay in delays:
+            # Right after cueing the server ignores locates for a moment.
+            await asyncio.sleep(delay)
+            rate = await c.measure_fps(last)
+            if rate:
+                break
         _LOGGER.debug("Measured %s fps for %s", rate, p.clip_id_to_str(clip))
         if rate:
             self._remember(clip, fps=float(rate), fps_source="measured")

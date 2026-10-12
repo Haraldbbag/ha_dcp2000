@@ -250,7 +250,7 @@ class DCPMediaPlayer(DCPEntity, MediaPlayerEntity):
         async def _do():
             await client.cue_clip(raw)
             try:  # cheap and exact: learn the edit rate while we own the transport
-                await self.coordinator.async_measure_fps(force=False)
+                await self.coordinator.async_measure_fps(force=False, delays=(1.0, 2.0))
             except DCPError as err:
                 _LOGGER.debug("Frame rate measurement skipped: %s", err)
             if start_frame:
