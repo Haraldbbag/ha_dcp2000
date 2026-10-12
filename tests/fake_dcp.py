@@ -33,6 +33,7 @@ NO_KDM = {b"KDMLESS\x00"}
 # Real DCP-2000 firmware answers 60.A2 (current frame) with 0; mimic that.
 BROKEN_CURRENT_FRAME = True
 PLAY_DELAY = 4.0  # seconds before PlaySPL is answered
+CHECK_DELAY = 1.0  # pre-show checks after the first PlaySPL
 
 
 class State:
@@ -219,8 +220,13 @@ async def serve_klv(st: State, reader, writer) -> None:
             st.klv_log.append(name)
             if name == "PlaySPL":
                 await asyncio.sleep(PLAY_DELAY)  # real server: pre-show checks first
-                # DCP-2000: first PlaySPL after loading parks the show paused
-                st.spl_state = 3 if st.spl_state == 1 else 2
+                # DCP-2000: the first PlaySPL after loading runs the checks
+                # (state stays "stopped") and then parks the show paused.
+                if st.spl_state == 1:
+                    asyncio.get_running_loop().call_later(
+                        CHECK_DELAY, lambda: setattr(st, "spl_state", 3))
+                else:
+                    st.spl_state = 2
             elif name == "PauseSPL":
                 st.spl_state = 3
             elif name in ("LoadSPL", "LoadSPLbyUUID", "EjectSPL"):

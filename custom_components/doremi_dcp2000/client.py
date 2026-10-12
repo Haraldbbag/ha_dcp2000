@@ -419,9 +419,13 @@ class KLVClient:
                     return msg
                 _LOGGER.debug("Skipping KLV %02X.%02X", msg.b14, msg.b15)
 
+        started = asyncio.get_running_loop().time()
         msg = await self._conn._exchange(
             p.klv_request(name, req_id, payload, self.reg), read, self.SLOW.get(name)
         )
+        if name != "StatusSPL":
+            _LOGGER.debug("KLV %s -> response %s after %.1f s", name, msg.response,
+                          asyncio.get_running_loop().time() - started)
         if msg.response:
             raise DCPCommandError(
                 f"{name}: {p.RESPONSE_CODES.get(msg.response, msg.response)}"

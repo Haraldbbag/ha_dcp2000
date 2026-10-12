@@ -55,6 +55,8 @@ class DCPData:
         if state == "ejected" and self.spl and self.spl.spl_uuid:
             # An SPL is loaded but not started: the 9-pin side shows "eject".
             state = {"playing": "playing", "paused": "paused"}.get(self.spl.state, "cued")
+        if self.spl and self.spl.state == "playing":
+            state = "playing"
         if self.starting and state != "playing":
             return "starting"
         return state
@@ -114,6 +116,7 @@ class DCPCoordinator(DataUpdateCoordinator[DCPData]):
         self.gpio_enabled: bool = entry.options.get(CONF_GPIO, False)
         self.default_fps: float = float(entry.options.get(CONF_FPS, DEFAULT_FPS))
         self._start_requested: float | None = None
+        self._spl_autoplay_until: float | None = None
         self.gpo_state: int = 0  # the device cannot report outputs; we remember them
         self._library_at = 0.0
         self._ext_supported = True
@@ -196,6 +199,7 @@ class DCPCoordinator(DataUpdateCoordinator[DCPData]):
         if self.klv and not self.klv.busy:  # don't queue behind a slow PlaySPL
             try:
                 data.spl = await self.klv.status_spl()
+                self._check_spl_autoplay(data)
                 self._klv_warned = False
             except DCPError as err:
                 data.spl = None
@@ -392,7 +396,8 @@ class DCPCoordinator(DataUpdateCoordinator[DCPData]):
             return
         waited = time.monotonic() - self._start_requested
         spl_loaded = bool(data.spl and data.spl.spl_uuid)
-        if data.status.playing or (data.status.ejected and not spl_loaded):
+        spl_playing = bool(data.spl and data.spl.state == "playing")
+        if data.status.playing or spl_playing or (data.status.ejected and not spl_loaded):
             self._start_requested = None
         elif waited > START_TIMEOUT:
             _LOGGER.warning("%s did not start playback within %d s (status %s)",
@@ -403,9 +408,10 @@ class DCPCoordinator(DataUpdateCoordinator[DCPData]):
     async def async_spl_play(self) -> None:
         """Start the loaded SPL.
 
-        On the DCP-2000 the first PlaySPL after loading only runs the pre-show
-        checks and parks the show paused at its start; a second PlaySPL starts
-        it. Send the second one automatically in that case.
+        On the DCP-2000 the first PlaySPL after loading is acknowledged at
+        once, then the server runs its pre-show checks (~30-60 s, state stays
+        "stopped") and parks the show *paused* at its start; a second PlaySPL
+        is needed. The polling loop watches for that and sends it.
         """
         klv = self.klv
         if klv is None:
@@ -414,16 +420,27 @@ class DCPCoordinator(DataUpdateCoordinator[DCPData]):
         self.mark_start_requested()
         await klv.simple("PlaySPL")
         if before.state != "paused":
-            # The state flips to "paused" only shortly after the answer.
-            after = before
-            for _ in range(20):
-                after = await klv.status_spl()
-                if after.state in ("playing", "paused"):
-                    break
-                await asyncio.sleep(0.5)
-            if after.state == "paused":
-                _LOGGER.debug("SPL parked after checks, sending PlaySPL again")
-                await klv.simple("PlaySPL")
+            self._spl_autoplay_until = time.monotonic() + START_TIMEOUT
+        await self.async_request_refresh()
+
+    def _check_spl_autoplay(self, data: DCPData) -> None:
+        if self._spl_autoplay_until is None or data.spl is None:
+            return
+        if time.monotonic() > self._spl_autoplay_until or data.spl.state == "playing":
+            self._spl_autoplay_until = None
+            return
+        if data.spl.state == "paused":
+            self._spl_autoplay_until = None
+            _LOGGER.debug("SPL parked after pre-show checks, sending PlaySPL again")
+            self.config_entry.async_create_background_task(
+                self.hass, self._second_play(), "doremi_dcp2000 second PlaySPL"
+            )
+
+    async def _second_play(self) -> None:
+        try:
+            await self.klv.simple("PlaySPL")
+        except DCPError as err:
+            _LOGGER.warning("Second PlaySPL failed: %s", err)
         await self.async_request_refresh()
 
     async def async_refresh_library(self) -> None:
