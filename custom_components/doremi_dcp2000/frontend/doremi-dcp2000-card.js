@@ -5,7 +5,7 @@
  *   type: custom:doremi-dcp2000-card
  *   entity: media_player.dcp_2000
  */
-const CARD_VERSION = "0.7.7";
+const CARD_VERSION = "0.7.8";
 
 const TEXT = {
   de: {

@@ -656,12 +656,42 @@ class DCPCoordinator(DataUpdateCoordinator[DCPData]):
                     await self._klv_confirmed("PauseSPL", "paused")
                 await self.klv.jump_to_timecode("00:00:00.00")
                 if playing:
-                    await self._klv_confirmed("PlaySPL", "playing")
+                    # The jump completes ~2 s later and pauses the show again:
+                    # wait for it, then start and make sure it keeps running.
+                    await self._wait_timecode_settled(0)
+                    await self._play_and_hold()
             else:
                 await self.klv.simple("SkipBackward")
         else:
             await self.client.locate(0)
         self.start_burst()
+
+    async def _wait_timecode_settled(self, frame: int, timeout: float = 4.0) -> None:
+        """Wait until the 9-pin timecode shows `frame` on two reads in a row."""
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout
+        hits = 0
+        while loop.time() < deadline:
+            await asyncio.sleep(0.3)
+            try:
+                tc = await self.client.timecode_parts()
+            except DCPCommandError:
+                continue
+            hits = hits + 1 if tc and p.timecode_to_frames(tc, self.current_fps()) == frame else 0
+            if hits >= 2:
+                return
+
+    async def _play_and_hold(self, watch: float = 4.0, retries: int = 2) -> None:
+        """PlaySPL, then watch a few seconds and resume if the server re-pauses."""
+        await self._klv_confirmed("PlaySPL", "playing")
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + watch
+        while loop.time() < deadline and retries:
+            await asyncio.sleep(0.5)
+            if (await self.klv.status_spl()).state == "paused":
+                _LOGGER.debug("Show paused again after resume, sending PlaySPL")
+                retries -= 1
+                await self._klv_confirmed("PlaySPL", "playing")
 
     async def _wait_spl_state(self, state: str, timeout: float = 4.0) -> bool:
         loop = asyncio.get_running_loop()
