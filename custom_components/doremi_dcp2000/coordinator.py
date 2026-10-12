@@ -413,10 +413,17 @@ class DCPCoordinator(DataUpdateCoordinator[DCPData]):
         before = await klv.status_spl()
         self.mark_start_requested()
         await klv.simple("PlaySPL")
-        after = await klv.status_spl()
-        if before.state != "paused" and after.state == "paused":
-            _LOGGER.debug("SPL parked after checks, sending PlaySPL again")
-            await klv.simple("PlaySPL")
+        if before.state != "paused":
+            # The state flips to "paused" only shortly after the answer.
+            after = before
+            for _ in range(20):
+                after = await klv.status_spl()
+                if after.state in ("playing", "paused"):
+                    break
+                await asyncio.sleep(0.5)
+            if after.state == "paused":
+                _LOGGER.debug("SPL parked after checks, sending PlaySPL again")
+                await klv.simple("PlaySPL")
         await self.async_request_refresh()
 
     async def async_refresh_library(self) -> None:
