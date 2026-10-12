@@ -118,6 +118,7 @@ class DCPCoordinator(DataUpdateCoordinator[DCPData]):
         self.gpio_enabled: bool = entry.options.get(CONF_GPIO, False)
         self.default_fps: float = float(entry.options.get(CONF_FPS, DEFAULT_FPS))
         self._start_requested: float | None = None
+        self._start_park = False
         self._spl_autoplay_until: float | None = None
         self._spl_items_uuid: str | None = None
         self._spl_xml: dict[str, str] = {}
@@ -393,9 +394,13 @@ class DCPCoordinator(DataUpdateCoordinator[DCPData]):
         self._titles[clip] = title
         return title
 
-    def mark_start_requested(self) -> None:
-        """Play was sent; the server may need up to ~30 s of checks before it runs."""
+    def mark_start_requested(self, park: bool = False) -> None:
+        """Play was sent; the server may need up to ~30 s of checks before it runs.
+
+        park=True: we only want the show checked and parked paused at its start.
+        """
         self._start_requested = time.monotonic()
+        self._start_park = park
         if self.data:
             self.data.starting = True
             self.async_update_listeners()
@@ -407,7 +412,8 @@ class DCPCoordinator(DataUpdateCoordinator[DCPData]):
         waited = time.monotonic() - self._start_requested
         spl_loaded = bool(data.spl and data.spl.spl_uuid)
         spl_playing = bool(data.spl and data.spl.state == "playing")
-        if data.status.playing or spl_playing or (data.status.ejected and not spl_loaded):
+        spl_parked = self._start_park and bool(data.spl and data.spl.state == "paused")
+        if data.status.playing or spl_playing or spl_parked or (data.status.ejected and not spl_loaded):
             self._start_requested = None
         elif waited > START_TIMEOUT:
             _LOGGER.warning("%s did not start playback within %d s (status %s)",
@@ -415,7 +421,7 @@ class DCPCoordinator(DataUpdateCoordinator[DCPData]):
             self._start_requested = None
         data.starting = self._start_requested is not None
 
-    async def async_spl_play(self) -> None:
+    async def async_spl_play(self, autoplay: bool = True) -> None:
         """Start the loaded SPL.
 
         On the DCP-2000 the first PlaySPL after loading is acknowledged at
@@ -427,9 +433,9 @@ class DCPCoordinator(DataUpdateCoordinator[DCPData]):
         if klv is None:
             raise DCPCommandError("KLV API not enabled")
         before = await klv.status_spl()
-        self.mark_start_requested()
+        self.mark_start_requested(park=not autoplay)
         await klv.simple("PlaySPL")
-        if before.state != "paused":
+        if before.state != "paused" and autoplay:
             self._spl_autoplay_until = time.monotonic() + START_TIMEOUT
         await self.async_request_refresh()
 
@@ -518,14 +524,10 @@ class DCPCoordinator(DataUpdateCoordinator[DCPData]):
                 raise DCPCommandError("KLV API not enabled")
             await self.klv.load_spl_uuid(self.spl_by_name(ident))
             self._spl_items_uuid = None
-            if start == "play":
-                await self.async_spl_play()
-                return
-            try:
-                await self.klv.simple("PauseSPL")
-            except DCPError as err:  # some firmware only pauses a running show
-                _LOGGER.debug("PauseSPL after load: %s", err)
-            await self.async_request_refresh()
+            # PauseSPL is ignored on a freshly loaded show. The first PlaySPL
+            # runs the pre-show checks and parks the show paused on its first
+            # frame - exactly "pause"; only "play" sends the second PlaySPL.
+            await self.async_spl_play(autoplay=start == "play")
             return
         raw = self.clip_by_name(ident)
         if self.spl_loaded:
@@ -539,8 +541,17 @@ class DCPCoordinator(DataUpdateCoordinator[DCPData]):
             await self.client.play()
             self.mark_start_requested()
         else:
-            await self.client.pause()
+            await self._pause_confirmed()
         await self.async_request_refresh()
+
+    async def _pause_confirmed(self, tries: int = 6) -> None:
+        """Right after cueing the server ignores STILL for a moment: repeat until paused."""
+        for _ in range(tries):
+            await self.client.pause()
+            await asyncio.sleep(0.5)
+            if (await self.client.status()).state == "paused":
+                return
+        _LOGGER.debug("%s did not confirm pause after loading", self.client.host)
 
     async def async_seek(self, timecode: str | None = None, position: float | None = None) -> None:
         """Jump inside the current clip/element to a timecode or a position in seconds."""
@@ -604,12 +615,10 @@ class DCPCoordinator(DataUpdateCoordinator[DCPData]):
         cpls.sort(key=lambda c: c["title"].lower())
         spls = []
         for label, uuid in (self.data.spls if self.data else {}).items():
-            frames = self._spl_cache.get(uuid, {}).get("frames")
-            spls.append({
-                "id": uuid,
-                "title": label,
-                "duration": round(frames / 24) if frames else None,
-            })
+            # GetSPLInfo's "duration" is in seconds on the DCP-2000 (checked
+            # against StatusSPL), despite the cache key name.
+            seconds = self._spl_cache.get(uuid, {}).get("frames")
+            spls.append({"id": uuid, "title": label, "duration": seconds or None})
         return {"cpls": cpls, "spls": spls}
 
     async def async_refresh_library(self) -> None:

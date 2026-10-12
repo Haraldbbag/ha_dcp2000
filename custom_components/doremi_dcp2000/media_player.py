@@ -90,6 +90,7 @@ async def async_setup_entry(
             vol.Exclusive("xml", "spl"): cv.string,
             vol.Exclusive("spl_uuid", "spl"): cv.string,
             vol.Optional("store", default=False): cv.boolean,
+            vol.Optional("start"): vol.In(["play", "pause"]),
         },
         "async_spl_load",
     )
@@ -388,16 +389,21 @@ class DCPMediaPlayer(DCPEntity, MediaPlayerEntity):
         return result
 
     async def async_spl_load(
-        self, xml: str | None = None, spl_uuid: str | None = None, store: bool = False
+        self, xml: str | None = None, spl_uuid: str | None = None, store: bool = False,
+        start: str | None = None,
     ) -> None:
         klv = self._require_klv()
         if spl_uuid:  # UUID, title or select-list label
-            await self._run(klv.load_spl_uuid(self.coordinator.spl_by_name(spl_uuid)))
+            await self._run(klv.load_spl_uuid(self.coordinator.spl_by_name(spl_uuid)), refresh=False)
         elif xml:
             self.coordinator.remember_spl_xml(xml)
-            await self._run(klv.store_spl(xml) if store else klv.load_spl(xml))
+            await self._run(klv.store_spl(xml) if store else klv.load_spl(xml), refresh=False)
         else:
             raise ServiceValidationError("Provide either xml or spl_uuid.")
+        if start:
+            await self._run(self.coordinator.async_spl_play(autoplay=start == "play"))
+        else:
+            await self.coordinator.async_request_refresh()
 
     async def async_spl_command(self, command: str) -> None:
         klv = self._require_klv()

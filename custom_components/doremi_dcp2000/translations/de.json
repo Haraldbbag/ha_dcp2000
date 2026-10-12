@@ -297,6 +297,10 @@
         "spl_uuid": {
           "name": "SPL",
           "description": "Name oder UUID einer gespeicherten SPL (statt XML)."
+        },
+        "start": {
+          "name": "Start",
+          "description": "Optional: play, oder pause = Prüfungen laufen lassen und auf dem ersten Frame parken."
         }
       }
     },
@@ -336,7 +340,7 @@
     },
     "load_content": {
       "name": "Inhalt laden",
-      "description": "Lädt ein CPL oder eine Show-Playlist. Start „play“ spielt ab, „pause“ parkt auf dem ersten Frame. Eine SPL mit Automation-Cues führt diese beim Abspielen aus.",
+      "description": "Lädt ein CPL oder eine Show-Playlist. „play“ spielt ab; „pause“ parkt auf dem ersten Frame (eine SPL macht dafür ihre Sicherheitsprüfungen, ca. 30–60 s). Automation-Cues einer SPL werden beim Abspielen ausgeführt.",
       "fields": {
         "kind": {
           "name": "Typ",

@@ -121,6 +121,11 @@ spl_load:
       default: false
       selector:
         boolean:
+    start:
+      selector:
+        select:
+          translation_key: load_start
+          options: [play, pause]
 
 spl_command:
   target:

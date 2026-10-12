@@ -5,7 +5,7 @@
  *   type: custom:doremi-dcp2000-card
  *   entity: media_player.dcp_2000
  */
-const CARD_VERSION = "0.7.0";
+const CARD_VERSION = "0.7.1";
 
 const TEXT = {
   de: {
@@ -539,7 +539,9 @@ class DoremiDcp2000Card extends HTMLElement {
         const res = await this._call("doremi_dcp2000", "spl_retrieve", { spl_uuid: id }, true);
         if (this._sel?.id !== id) return;
         const xml = new DOMParser().parseFromString(res?.xml || "", "application/xml");
-        const cues = [...xml.getElementsByTagNameNS("*", "Action")].map((n) => n.textContent.trim()).filter(Boolean);
+        const cues = [...xml.getElementsByTagNameNS("*", "AutomationCue")]
+          .map((c) => c.getElementsByTagNameNS("*", "Action")[0]?.textContent.trim())
+          .filter(Boolean);
         const uniq = [...new Set(cues)];
         info.className = uniq.length ? "cueinfo warn" : "cueinfo";
         info.textContent = uniq.length ? `⚙ ${t.cues}: ${uniq.join(", ")}` : t.noCues;

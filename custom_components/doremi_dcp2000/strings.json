@@ -297,6 +297,10 @@
         "spl_uuid": {
           "name": "SPL",
           "description": "Title or UUID of a stored SPL (instead of XML)."
+        },
+        "start": {
+          "name": "Start",
+          "description": "Optional: play, or pause = run the pre-show checks and park on the first frame."
         }
       }
     },
@@ -336,7 +340,7 @@
     },
     "load_content": {
       "name": "Load content",
-      "description": "Loads a CPL or a show playlist. Start 'play' runs it, 'pause' parks it on its first frame. An SPL with automation cues executes them when played.",
+      "description": "Loads a CPL or a show playlist. 'play' runs it; 'pause' parks it on its first frame (an SPL runs its pre-show checks for that, ~30-60 s). Automation cues of an SPL are executed when it plays.",
       "fields": {
         "kind": {
           "name": "Type",

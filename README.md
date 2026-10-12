@@ -82,7 +82,10 @@ entity: media_player.kino_1
 - **Auswerfen:** bei Wiedergabe mit Sicherheitsabfrage; bei Pause sofort;
   sonst öffnet sich der Ladedialog (Reiter CPL / SPL, Suche). Bei einer SPL
   werden vor dem Laden ihre Automation-Cues angezeigt. „Abspielen“ startet
-  sofort, „Pause“ lädt und bleibt auf dem ersten Frame stehen.
+  sofort, „Pause“ lädt und bleibt auf dem ersten Frame stehen. Eine SPL kann
+  der DCP-2000 nicht ohne Start pausieren: Für „Pause“ schickt die Integration
+  ein einzelnes `PlaySPL`, der Server macht seine Prüfungen (ca. 30–60 s,
+  Anzeige „Startet …“) und parkt die Show pausiert am Anfang.
 - **Nur in Pause:** Klick auf ein Event springt dorthin (`SkipToEvent`),
   der Clip-Balken lässt sich mit der Maus ziehen, ein Klick auf den Timecode
   öffnet eine Eingabe (HH:MM:SS:FF).
