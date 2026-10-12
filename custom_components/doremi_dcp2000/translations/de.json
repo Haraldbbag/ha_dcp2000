@@ -1,0 +1,283 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Doremi DCP-2000 hinzufügen",
+        "description": "Der Steuerport des Servers ist normalerweise 5000.",
+        "data": {
+          "host": "Host",
+          "port": "Port",
+          "name": "Name (z. B. Kino 1)"
+        }
+      },
+      "reconfigure": {
+        "title": "Verbindung ändern",
+        "data": {
+          "host": "Host",
+          "port": "Port"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Keine Verbindung zum Server."
+    },
+    "abort": {
+      "already_configured": "Dieser Server ist bereits eingerichtet.",
+      "reconfigure_successful": "Verbindung aktualisiert.",
+      "wrong_device": "Das ist ein anderer Server (Seriennummer weicht ab)."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Optionen",
+        "data": {
+          "scan_interval": "Abfrageintervall (s)",
+          "fps": "Standard-Bildrate",
+          "gpio": "GPIO-Entitäten (8 Ein-/8 Ausgänge)",
+          "klv": "CPL/SPL-API (KLV) aktivieren",
+          "klv_port": "KLV-Port"
+        },
+        "data_description": {
+          "fps": "Wird genutzt, wenn die Bildrate nicht aus dem CPL gelesen werden kann (braucht KLV).",
+          "klv": "Ergänzt SPL-Steuerung, CPL-Titel und Bildraten. Wird beim Speichern getestet."
+        }
+      }
+    },
+    "error": {
+      "klv_unreachable": "Die KLV-API antwortet auf diesem Port nicht."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "transport": {
+        "name": "Transport",
+        "state": {
+          "playing": "Wiedergabe",
+          "paused": "Pause",
+          "cued": "Geladen",
+          "cueing": "Lädt",
+          "stopped": "Gestoppt"
+        }
+      },
+      "title": {
+        "name": "Titel"
+      },
+      "clip_id": {
+        "name": "Clip-ID"
+      },
+      "cpl_uuid": {
+        "name": "CPL UUID"
+      },
+      "timecode": {
+        "name": "Timecode"
+      },
+      "progress": {
+        "name": "Fortschritt"
+      },
+      "remaining": {
+        "name": "Restzeit"
+      },
+      "frame": {
+        "name": "Frame"
+      },
+      "library": {
+        "name": "Clips auf dem Server"
+      },
+      "gpi": {
+        "name": "GPI-Byte"
+      },
+      "spl_state": {
+        "name": "SPL-Status",
+        "state": {
+          "playing": "Wiedergabe",
+          "paused": "Pause",
+          "stopped": "Gestoppt"
+        }
+      },
+      "spl_progress": {
+        "name": "SPL-Fortschritt"
+      },
+      "spl_uuid": {
+        "name": "SPL UUID"
+      }
+    },
+    "binary_sensor": {
+      "connected": {
+        "name": "Verbunden"
+      },
+      "gpi": {
+        "name": "GPI {line}"
+      }
+    },
+    "switch": {
+      "gpo": {
+        "name": "GPO {line}"
+      }
+    },
+    "button": {
+      "shutter_open": {
+        "name": "Dowser öffnen"
+      },
+      "shutter_close": {
+        "name": "Dowser schließen"
+      },
+      "projector_on": {
+        "name": "Projektor an"
+      },
+      "projector_off": {
+        "name": "Projektor aus"
+      },
+      "step_back": {
+        "name": "Frame zurück"
+      },
+      "refresh_library": {
+        "name": "Bibliothek aktualisieren"
+      },
+      "spl_play": {
+        "name": "SPL abspielen"
+      },
+      "spl_pause": {
+        "name": "SPL pausieren"
+      },
+      "spl_eject": {
+        "name": "SPL auswerfen"
+      }
+    }
+  },
+  "selector": {
+    "spl_command": {
+      "options": {
+        "play": "Abspielen",
+        "pause": "Pause",
+        "eject": "Auswerfen",
+        "skip_forward": "Nächstes CPL",
+        "skip_backward": "Vorheriges CPL",
+        "loop_on": "Schleife an",
+        "loop_off": "Schleife aus"
+      }
+    }
+  },
+  "services": {
+    "cue_clip": {
+      "name": "Clip laden",
+      "description": "Lädt einen Clip im Auto-Modus (In/Out-Preset) und startet ihn optional.",
+      "fields": {
+        "clip": {
+          "name": "Clip",
+          "description": "Clip-ID (8 Zeichen), Bibliotheks-Eintrag oder CPL-Titel."
+        },
+        "start_frame": {
+          "name": "Start-Frame",
+          "description": "Frame, ab dem gestartet wird."
+        },
+        "autoplay": {
+          "name": "Automatisch abspielen",
+          "description": "Nach dem Laden sofort abspielen."
+        }
+      }
+    },
+    "queue_clip": {
+      "name": "Nächsten Clip einreihen",
+      "description": "Setzt das Preview-Preset, damit dieser Clip nach dem aktuellen läuft.",
+      "fields": {
+        "clip": {
+          "name": "Clip",
+          "description": "Clip-ID, Eintrag oder Titel."
+        }
+      }
+    },
+    "set_frame": {
+      "name": "Zu Frame springen",
+      "description": "Springt auf einen absoluten Frame (24.9D).",
+      "fields": {
+        "frame": {
+          "name": "Frame",
+          "description": "Frame-Index."
+        }
+      }
+    },
+    "step_back": {
+      "name": "Frame zurück",
+      "description": "Einen Frame zurück (nur in Pause)."
+    },
+    "projector_channel": {
+      "name": "Projektor-Kanal",
+      "description": "Schaltet den Projektor-Kanal über den Server.",
+      "fields": {
+        "channel": {
+          "name": "Kanal",
+          "description": "Kanalnummer."
+        }
+      }
+    },
+    "set_gpo": {
+      "name": "GPO-Byte setzen",
+      "description": "Setzt alle 8 GPO-Ausgänge auf einmal (Bit 0 = Ausgang 1).",
+      "fields": {
+        "value": {
+          "name": "Wert",
+          "description": "0–255."
+        }
+      }
+    },
+    "send_command": {
+      "name": "Rohbefehl senden",
+      "description": "Sendet einen Sony-9-Pin-Befehl in Hex (Prüfsumme wird ergänzt).",
+      "fields": {
+        "command": {
+          "name": "Befehl",
+          "description": "Hex-Bytes, z. B. 20 01."
+        }
+      }
+    },
+    "list_content": {
+      "name": "Inhalte auflisten",
+      "description": "Liefert Clips (und CPLs/SPLs/KDMs, wenn die KLV-API aktiv ist)."
+    },
+    "spl_load": {
+      "name": "Show-Playlist laden",
+      "description": "Sendet SPL-XML an den Server (KLV-API).",
+      "fields": {
+        "xml": {
+          "name": "SPL-XML",
+          "description": "Vollständiges ShowPlaylist-XML."
+        },
+        "store": {
+          "name": "Nur speichern",
+          "description": "Speichern (StoreSPL) statt zum Abspielen laden."
+        }
+      }
+    },
+    "spl_command": {
+      "name": "Show-Playlist-Befehl",
+      "description": "Steuert die geladene SPL (KLV-API).",
+      "fields": {
+        "command": {
+          "name": "Befehl",
+          "description": "Auszuführende Aktion."
+        }
+      }
+    },
+    "spl_jump": {
+      "name": "In SPL springen",
+      "description": "Springt vor/zurück (negativ) im aktuellen CPL. Nur in Pause; die Firmware nutzt evtl. fest 180 s.",
+      "fields": {
+        "seconds": {
+          "name": "Sekunden",
+          "description": "Positiv = vorwärts."
+        }
+      }
+    },
+    "spl_retrieve": {
+      "name": "SPL abrufen",
+      "description": "Liefert das XML einer gespeicherten SPL.",
+      "fields": {
+        "spl_uuid": {
+          "name": "SPL-UUID",
+          "description": "UUID der Show-Playlist."
+        }
+      }
+    }
+  }
+}

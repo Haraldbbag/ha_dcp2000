@@ -1,0 +1,42 @@
+{
+  "entity": {
+    "button": {
+      "shutter_open": {"default": "mdi:projector-shot"},
+      "shutter_close": {"default": "mdi:projector-off"},
+      "projector_on": {"default": "mdi:power"},
+      "projector_off": {"default": "mdi:power-off"},
+      "step_back": {"default": "mdi:step-backward"},
+      "refresh_library": {"default": "mdi:refresh"},
+      "spl_play": {"default": "mdi:playlist-play"},
+      "spl_pause": {"default": "mdi:pause"},
+      "spl_eject": {"default": "mdi:eject"}
+    },
+    "sensor": {
+      "transport": {"default": "mdi:filmstrip"},
+      "title": {"default": "mdi:movie-open"},
+      "clip_id": {"default": "mdi:identifier"},
+      "timecode": {"default": "mdi:timer-outline"},
+      "progress": {"default": "mdi:progress-clock"},
+      "library": {"default": "mdi:filmstrip-box-multiple"},
+      "gpi": {"default": "mdi:electric-switch"},
+      "spl_state": {"default": "mdi:playlist-play"},
+      "spl_progress": {"default": "mdi:progress-clock"}
+    },
+    "binary_sensor": {"gpi": {"default": "mdi:electric-switch"}},
+    "switch": {"gpo": {"default": "mdi:electric-switch-closed"}}
+  },
+  "services": {
+    "cue_clip": {"service": "mdi:movie-open-play"},
+    "queue_clip": {"service": "mdi:playlist-plus"},
+    "set_frame": {"service": "mdi:debug-step-over"},
+    "step_back": {"service": "mdi:step-backward"},
+    "projector_channel": {"service": "mdi:projector"},
+    "set_gpo": {"service": "mdi:electric-switch"},
+    "send_command": {"service": "mdi:console"},
+    "list_content": {"service": "mdi:format-list-bulleted"},
+    "spl_load": {"service": "mdi:playlist-edit"},
+    "spl_command": {"service": "mdi:playlist-play"},
+    "spl_jump": {"service": "mdi:fast-forward"},
+    "spl_retrieve": {"service": "mdi:file-xml-box"}
+  }
+}

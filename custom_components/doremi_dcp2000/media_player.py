@@ -1,0 +1,309 @@
+"""Media player for the Doremi DCP-2000."""
+
+from __future__ import annotations
+
+from collections.abc import Awaitable
+from typing import Any
+
+import voluptuous as vol
+
+from homeassistant.components.media_player import (
+    MediaPlayerEntity,
+    MediaPlayerEntityFeature,
+    MediaPlayerState,
+    MediaType,
+)
+from homeassistant.core import HomeAssistant, ServiceResponse, SupportsResponse
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
+from homeassistant.helpers import config_validation as cv, entity_platform
+from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
+
+from . import protocol as p
+from .client import DCPError
+from .coordinator import DCPConfigEntry, DCPCoordinator
+from .entity import DCPEntity
+
+STATE_MAP = {
+    "playing": MediaPlayerState.PLAYING,
+    "paused": MediaPlayerState.PAUSED,
+    "cued": MediaPlayerState.IDLE,
+    "cueing": MediaPlayerState.BUFFERING,
+    "stopped": MediaPlayerState.IDLE,
+}
+
+
+async def async_setup_entry(
+    hass: HomeAssistant, entry: DCPConfigEntry, async_add_entities: AddConfigEntryEntitiesCallback
+) -> None:
+    async_add_entities([DCPMediaPlayer(entry.runtime_data)])
+
+    platform = entity_platform.async_get_current_platform()
+    platform.async_register_entity_service(
+        "cue_clip",
+        {
+            vol.Required("clip"): cv.string,
+            vol.Optional("start_frame", default=0): vol.All(vol.Coerce(int), vol.Range(min=0)),
+            vol.Optional("autoplay", default=False): cv.boolean,
+        },
+        "async_cue_clip",
+    )
+    platform.async_register_entity_service(
+        "queue_clip", {vol.Required("clip"): cv.string}, "async_queue_clip"
+    )
+    platform.async_register_entity_service(
+        "set_frame", {vol.Required("frame"): vol.All(vol.Coerce(int), vol.Range(min=0))},
+        "async_set_frame",
+    )
+    platform.async_register_entity_service("step_back", None, "async_step_back")
+    platform.async_register_entity_service(
+        "projector_channel",
+        {vol.Required("channel"): vol.All(vol.Coerce(int), vol.Range(min=0, max=255))},
+        "async_projector_channel",
+    )
+    platform.async_register_entity_service(
+        "set_gpo", {vol.Required("value"): vol.All(vol.Coerce(int), vol.Range(min=0, max=255))},
+        "async_set_gpo",
+    )
+    platform.async_register_entity_service(
+        "send_command",
+        {vol.Required("command"): cv.string},
+        "async_send_command",
+        supports_response=SupportsResponse.OPTIONAL,
+    )
+    platform.async_register_entity_service(
+        "list_content", None, "async_list_content", supports_response=SupportsResponse.ONLY
+    )
+    # --- SPL (KLV API) ---
+    platform.async_register_entity_service(
+        "spl_load", {vol.Required("xml"): cv.string, vol.Optional("store", default=False): cv.boolean},
+        "async_spl_load",
+    )
+    platform.async_register_entity_service(
+        "spl_command",
+        {vol.Required("command"): vol.In(
+            ["play", "pause", "eject", "skip_forward", "skip_backward", "loop_on", "loop_off"]
+        )},
+        "async_spl_command",
+    )
+    platform.async_register_entity_service(
+        "spl_jump", {vol.Required("seconds"): vol.Coerce(int)}, "async_spl_jump"
+    )
+    platform.async_register_entity_service(
+        "spl_retrieve", {vol.Required("spl_uuid"): cv.string}, "async_spl_retrieve",
+        supports_response=SupportsResponse.ONLY,
+    )
+
+
+class DCPMediaPlayer(DCPEntity, MediaPlayerEntity):
+    _attr_name = None
+    _attr_media_content_type = MediaType.MOVIE
+
+    def __init__(self, coordinator: DCPCoordinator) -> None:
+        super().__init__(coordinator, "player")
+        features = (
+            MediaPlayerEntityFeature.PLAY
+            | MediaPlayerEntityFeature.PAUSE
+            | MediaPlayerEntityFeature.STOP
+            | MediaPlayerEntityFeature.SEEK
+            | MediaPlayerEntityFeature.SELECT_SOURCE
+            | MediaPlayerEntityFeature.PLAY_MEDIA
+        )
+        if coordinator.klv:
+            features |= (
+                MediaPlayerEntityFeature.NEXT_TRACK | MediaPlayerEntityFeature.PREVIOUS_TRACK
+            )
+        self._attr_supported_features = features
+
+    # -- helpers ------------------------------------------------------------
+
+    async def _run(self, coro: Awaitable[Any], refresh: bool = True) -> Any:
+        try:
+            result = await coro
+        except DCPError as err:
+            raise HomeAssistantError(f"DCP-2000: {err}") from err
+        if refresh:
+            await self.coordinator.async_request_refresh()
+        return result
+
+    def _require_klv(self):
+        if self.coordinator.klv is None:
+            raise ServiceValidationError(
+                "The SPL/KLV API is not enabled for this server (integration options)."
+            )
+        return self.coordinator.klv
+
+    # -- state --------------------------------------------------------------
+
+    @property
+    def state(self) -> MediaPlayerState:
+        if not self.coordinator.last_update_success:
+            return MediaPlayerState.OFF
+        return STATE_MAP.get(self.coordinator.data.state, MediaPlayerState.IDLE)
+
+    @property
+    def available(self) -> bool:
+        return True  # show OFF instead of unavailable when the server is down
+
+    @property
+    def media_title(self) -> str | None:
+        d = self.coordinator.data
+        return d.title or d.clip_name
+
+    @property
+    def media_content_id(self) -> str | None:
+        return self.coordinator.data.uuid or self.coordinator.data.clip_name
+
+    @property
+    def media_duration(self) -> float | None:
+        return self.coordinator.data.duration
+
+    @property
+    def media_position(self) -> float | None:
+        return self.coordinator.data.position
+
+    @property
+    def media_position_updated_at(self):
+        return self.coordinator.data.position_updated_at
+
+    @property
+    def source(self) -> str | None:
+        return self.coordinator.label_for(self.coordinator.data.clip_id)
+
+    @property
+    def source_list(self) -> list[str]:
+        return sorted(self.coordinator.data.clips)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        d = self.coordinator.data
+        attrs: dict[str, Any] = {
+            "clip_id": d.clip_name,
+            "cpl_uuid": d.uuid,
+            "frame": d.frame,
+            "last_frame": d.last_frame,
+            "timecode": d.timecode,
+            "frame_rate": d.fps,
+            "transport": d.state,
+            "auto_mode": d.status.auto_mode,
+        }
+        if d.cpl:
+            attrs |= {
+                "content_kind": d.cpl.kind,
+                "resolution": f"{d.cpl.width}x{d.cpl.height}",
+                "audio_channels": d.cpl.channels,
+                "encrypted": d.cpl.encrypted,
+            }
+        if d.spl:
+            attrs |= {
+                "spl_uuid": d.spl.spl_uuid,
+                "spl_state": d.spl.state,
+                "spl_progress": d.spl.spl_percent,
+            }
+        return attrs
+
+    # -- transport ----------------------------------------------------------
+
+    async def async_media_play(self) -> None:
+        await self._run(self.coordinator.client.play())
+
+    async def async_media_pause(self) -> None:
+        await self._run(self.coordinator.client.pause())
+
+    async def async_media_stop(self) -> None:
+        await self._run(self.coordinator.client.stop())
+
+    async def async_media_seek(self, position: float) -> None:
+        await self._run(self.coordinator.client.set_frame(round(position * self.coordinator.data.fps)))
+
+    async def async_select_source(self, source: str) -> None:
+        await self.async_cue_clip(source)
+
+    async def async_play_media(self, media_type: str, media_id: str, **kwargs: Any) -> None:
+        await self.async_cue_clip(media_id, autoplay=True)
+
+    async def async_media_next_track(self) -> None:
+        await self._run(self._require_klv().simple("SkipForward"))
+
+    async def async_media_previous_track(self) -> None:
+        await self._run(self._require_klv().simple("SkipBackward"))
+
+    # -- services -----------------------------------------------------------
+
+    async def async_cue_clip(self, clip: str, start_frame: int = 0, autoplay: bool = False) -> None:
+        client = self.coordinator.client
+        raw = self.coordinator.clip_by_name(clip)
+
+        async def _do():
+            await client.cue_clip(raw, start_frame or None)
+            if autoplay:
+                await client.play()
+
+        await self._run(_do())
+
+    async def async_queue_clip(self, clip: str) -> None:
+        await self._run(self.coordinator.client.queue_next_clip(self.coordinator.clip_by_name(clip)))
+
+    async def async_set_frame(self, frame: int) -> None:
+        await self._run(self.coordinator.client.set_frame(frame))
+
+    async def async_step_back(self) -> None:
+        await self._run(self.coordinator.client.step_back())
+
+    async def async_projector_channel(self, channel: int) -> None:
+        await self._run(self.coordinator.client.projector(p.PROJ_CHANNEL, channel), refresh=False)
+
+    async def async_set_gpo(self, value: int) -> None:
+        await self._run(self.coordinator.client.set_gpo(value), refresh=False)
+        self.coordinator.gpo_state = value
+        self.coordinator.async_update_listeners()
+
+    async def async_send_command(self, command: str) -> ServiceResponse:
+        try:
+            frame = p.raw_frame(command)
+        except ValueError as err:
+            raise ServiceValidationError(f"Invalid hex command: {command}") from err
+        reply = await self._run(self.coordinator.client.send_frame(frame))
+        return {
+            "sent": frame.hex(" "),
+            "reply": reply.code,
+            "data": reply.data.hex(" "),
+            "text": p.decode_text(reply.data),
+        }
+
+    async def async_list_content(self) -> ServiceResponse:
+        coordinator = self.coordinator
+        clips = [
+            {"clip_id": p.clip_id_to_str(raw), "label": label}
+            for label, raw in sorted(coordinator.data.clips.items())
+        ]
+        result: dict[str, Any] = {"clips": clips}
+        if coordinator.klv:
+            klv = coordinator.klv
+            result["cpls"] = await self._run(klv.get_cpl_list(), refresh=False)
+            result["spls"] = await self._run(klv.get_spl_list(), refresh=False)
+            result["kdms"] = await self._run(klv.get_kdm_list(), refresh=False)
+        return result
+
+    async def async_spl_load(self, xml: str, store: bool = False) -> None:
+        klv = self._require_klv()
+        await self._run(klv.store_spl(xml) if store else klv.load_spl(xml))
+
+    async def async_spl_command(self, command: str) -> None:
+        klv = self._require_klv()
+        actions = {
+            "play": lambda: klv.simple("PlaySPL"),
+            "pause": lambda: klv.simple("PauseSPL"),
+            "eject": lambda: klv.simple("EjectSPL"),
+            "skip_forward": lambda: klv.simple("SkipForward"),
+            "skip_backward": lambda: klv.simple("SkipBackward"),
+            "loop_on": lambda: klv.loop_mode(True),
+            "loop_off": lambda: klv.loop_mode(False),
+        }
+        await self._run(actions[command]())
+
+    async def async_spl_jump(self, seconds: int) -> None:
+        await self._run(self._require_klv().jump(seconds))
+
+    async def async_spl_retrieve(self, spl_uuid: str) -> ServiceResponse:
+        xml = await self._run(self._require_klv().retrieve_spl(spl_uuid), refresh=False)
+        return {"spl_uuid": spl_uuid, "xml": xml}

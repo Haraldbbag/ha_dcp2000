@@ -1,0 +1,161 @@
+cue_clip:
+  target:
+    entity:
+      integration: doremi_dcp2000
+      domain: media_player
+  fields:
+    clip:
+      required: true
+      example: "SPOT 1"
+      selector:
+        text:
+    start_frame:
+      default: 0
+      selector:
+        number:
+          min: 0
+          max: 1000000
+          mode: box
+    autoplay:
+      default: false
+      selector:
+        boolean:
+
+queue_clip:
+  target:
+    entity:
+      integration: doremi_dcp2000
+      domain: media_player
+  fields:
+    clip:
+      required: true
+      selector:
+        text:
+
+set_frame:
+  target:
+    entity:
+      integration: doremi_dcp2000
+      domain: media_player
+  fields:
+    frame:
+      required: true
+      selector:
+        number:
+          min: 0
+          max: 10000000
+          mode: box
+
+step_back:
+  target:
+    entity:
+      integration: doremi_dcp2000
+      domain: media_player
+
+projector_channel:
+  target:
+    entity:
+      integration: doremi_dcp2000
+      domain: media_player
+  fields:
+    channel:
+      required: true
+      selector:
+        number:
+          min: 0
+          max: 255
+          mode: box
+
+set_gpo:
+  target:
+    entity:
+      integration: doremi_dcp2000
+      domain: media_player
+  fields:
+    value:
+      required: true
+      selector:
+        number:
+          min: 0
+          max: 255
+          mode: box
+
+send_command:
+  target:
+    entity:
+      integration: doremi_dcp2000
+      domain: media_player
+  fields:
+    command:
+      required: true
+      example: "61 20 0A"
+      selector:
+        text:
+
+list_content:
+  target:
+    entity:
+      integration: doremi_dcp2000
+      domain: media_player
+
+spl_load:
+  target:
+    entity:
+      integration: doremi_dcp2000
+      domain: media_player
+  fields:
+    xml:
+      required: true
+      selector:
+        text:
+          multiline: true
+    store:
+      default: false
+      selector:
+        boolean:
+
+spl_command:
+  target:
+    entity:
+      integration: doremi_dcp2000
+      domain: media_player
+  fields:
+    command:
+      required: true
+      selector:
+        select:
+          translation_key: spl_command
+          options:
+            - play
+            - pause
+            - eject
+            - skip_forward
+            - skip_backward
+            - loop_on
+            - loop_off
+
+spl_jump:
+  target:
+    entity:
+      integration: doremi_dcp2000
+      domain: media_player
+  fields:
+    seconds:
+      required: true
+      default: 180
+      selector:
+        number:
+          min: -36000
+          max: 36000
+          mode: box
+
+spl_retrieve:
+  target:
+    entity:
+      integration: doremi_dcp2000
+      domain: media_player
+  fields:
+    spl_uuid:
+      required: true
+      selector:
+        text:
