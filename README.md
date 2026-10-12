@@ -109,6 +109,26 @@ actions:
     target: {entity_id: button.kino_1_dowser_schliessen}
 ```
 
+## Bildrate, Position und Startverzögerung
+
+- **Position/Fortschritt** werden aus dem Timecode berechnet, weil `60.A2`
+  (aktueller Frame) auf der DCP-2000-Firmware immer 0 liefert.
+- **Bildrate je Clip** (24, 25, 30, 48 … fps): Ohne KLV-API gibt es keinen
+  Lesebefehl dafür. Die Integration misst sie deshalb, indem sie im Pause-Zustand
+  kurz auf einen Testframe springt, den Timecode liest und zurückspringt.
+  Das passiert automatisch nach jedem Laden über HA (`cue_clip`, Quelle
+  wählen) und per Button **Bildrate messen**. Clips, die anders geladen wurden,
+  starten mit der Standard-Bildrate und werden korrigiert, sobald der Timecode
+  einen höheren Frame-Wert zeigt. Ergebnisse und Titel werden je Clip
+  gespeichert (überleben Neustarts); Clips mit bekanntem Titel erscheinen in der
+  Quellenliste als „Clip-ID – Titel“.
+- **Startverzögerung:** Der Server prüft vor dem Abspielen u. a. KDM und
+  Projektor-Verbindung, das kann bis ~30 s dauern. Nach „Play“ aus HA zeigt der
+  Player daher „Startet …“ (Transport-Sensor `starting`), bis der Film läuft.
+  Laden wartet bis zu 60 s; lässt sich ein Clip nicht laden (Server wirft aus,
+  z. B. fehlender/abgelaufener KDM), meldet die Aktion einen Fehler und der
+  Transport zeigt „Ausgeworfen“.
+
 ## Protokoll-Hinweise
 
 Grundlage sind die Doremi-Dokumente *DCP-2000 API Description* v1.0/v1.5 und

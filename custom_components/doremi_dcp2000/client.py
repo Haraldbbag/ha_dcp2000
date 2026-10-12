@@ -76,9 +76,9 @@ class _Connection:
                 except (OSError, asyncio.TimeoutError, asyncio.IncompleteReadError) as err:
                     await self.close()
                     if attempt == 2:
-                        raise DCPConnectionError(
-                            f"{self.host}:{self.port}: {err or type(err).__name__}"
-                        ) from err
+                        reason = str(err) or ("no answer" if isinstance(err, asyncio.TimeoutError)
+                                              else type(err).__name__)
+                        raise DCPConnectionError(f"{self.host}:{self.port}: {reason}") from err
                     _LOGGER.debug("Retrying after error: %r", err)
         raise DCPConnectionError("unreachable")
 
@@ -169,13 +169,51 @@ class DCP2000Client:
     async def set_frame(self, frame: int) -> None:
         await self.command(p.CMD_SET_FRAME, max(0, int(frame)).to_bytes(4, "big"))
 
-    async def cue_clip(self, clip_id: bytes, start_frame: int | None = None) -> None:
-        """Load a clip using auto mode (In Preset by ID + full-length Out Preset)."""
+    async def cue_clip(self, clip_id: bytes, start_frame: int | None = None,
+                       timeout: float = 60.0) -> None:
+        """Load a clip using auto mode (In Preset by ID + full-length Out Preset).
+
+        Waits until the server reports the clip as loaded; raises DCPCommandError
+        when it ejects instead (e.g. encrypted CPL without valid KDM).
+        """
         await self.command(p.CMD_AUTO_ON)
         await self.command(p.CMD_IN_PRESET, clip_id)
         await self.command(p.CMD_OUT_PRESET)
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout
+        while True:
+            await asyncio.sleep(0.3)
+            status = await self.status()
+            if not status.preroll:
+                loaded = await self.loaded_id()
+                if loaded == clip_id:
+                    break
+                if status.ejected or (loaded is None and not status.cue_complete):
+                    raise DCPCommandError(
+                        f"server could not load clip {p.clip_id_to_str(clip_id)!r} "
+                        "(missing/expired KDM or broken content?)"
+                    )
+            if loop.time() > deadline:
+                raise DCPCommandError(f"timeout loading clip {p.clip_id_to_str(clip_id)!r}")
         if start_frame:
             await self.set_frame(start_frame)
+
+    async def measure_fps(self, last_frame: int | None = None) -> int | None:
+        """Find the edit rate by locating to a probe frame and reading the timecode.
+
+        Only call while not playing. The previous position is restored.
+        """
+        probe = p.probe_frame(last_frame)
+        if probe is None:
+            return None
+        before = await self.timecode_parts()
+        await self.set_frame(probe)
+        await asyncio.sleep(0.2)
+        after = await self.timecode_parts()
+        rate = p.match_rate(probe, after) if after else None
+        if before is not None:
+            await self.set_frame(p.timecode_to_frames(before, rate or 24))
+        return rate
 
     async def queue_next_clip(self, clip_id: bytes) -> None:
         """Preview In/Out preset: play this clip after the current one."""
@@ -194,8 +232,12 @@ class DCP2000Client:
     async def last_frame(self) -> int | None:
         return p.decode_u32((await self.command(p.CMD_LAST_FRAME)).data)
 
+    async def timecode_parts(self) -> p.Timecode | None:
+        reply = await self.command(p.CMD_CURRENT_TIME_SENSE, b"\x01")
+        return p.decode_timecode_parts(reply.data)
+
     async def timecode(self) -> str | None:
-        return p.decode_timecode((await self.command(p.CMD_CURRENT_TIME_SENSE, b"\x01")).data)
+        return p.format_timecode(await self.timecode_parts())
 
     async def loaded_id(self) -> bytes | None:
         return p.decode_clip_id((await self.command(p.CMD_LOADED_ID)).data)

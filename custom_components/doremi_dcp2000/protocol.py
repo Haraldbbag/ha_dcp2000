@@ -173,15 +173,65 @@ def bcd(value: int) -> int:
     return ((value >> 4) & 0x0F) * 10 + (value & 0x0F)
 
 
-def decode_timecode(data: bytes) -> str | None:
+Timecode = tuple[int, int, int, int]  # hours, minutes, seconds, frames
+
+# Frame rates found in DCI / SMPTE DCPs (integer edit rates only).
+STANDARD_RATES = (24, 25, 30, 48, 50, 60, 96, 100, 120)
+
+
+def decode_timecode_parts(data: bytes) -> Timecode | None:
     """Sony LTC time data: frames, seconds, minutes, hours (BCD)."""
     if len(data) < 4:
         return None
-    frames = bcd(data[0] & 0x3F)
+    # Bit 6 is the drop-frame flag in video timecode; D-Cinema never uses drop
+    # frame, so treat it as a tens bit (HFR content can show frames >= 40).
+    frames = bcd(data[0] & 0x7F)
     seconds = bcd(data[1] & 0x7F)
     minutes = bcd(data[2] & 0x7F)
     hours = bcd(data[3] & 0x3F)
-    return f"{hours:02d}:{minutes:02d}:{seconds:02d}:{frames:02d}"
+    return hours, minutes, seconds, frames
+
+
+def format_timecode(tc: Timecode | None) -> str | None:
+    if tc is None:
+        return None
+    return "{:02d}:{:02d}:{:02d}:{:02d}".format(*tc)
+
+
+def decode_timecode(data: bytes) -> str | None:
+    return format_timecode(decode_timecode_parts(data))
+
+
+def timecode_to_frames(tc: Timecode, fps: float) -> int:
+    hours, minutes, seconds, frames = tc
+    return round(((hours * 60 + minutes) * 60 + seconds) * fps) + frames
+
+
+def frames_to_timecode(frame: int, fps: int) -> Timecode:
+    seconds, frames = divmod(frame, fps)
+    minutes, seconds = divmod(seconds, 60)
+    hours, minutes = divmod(minutes, 60)
+    return hours, minutes, seconds, frames
+
+
+def match_rate(frame: int, tc: Timecode) -> int | None:
+    """Which standard rate turns `frame` into timecode `tc`?"""
+    hits = [r for r in STANDARD_RATES if frames_to_timecode(frame, r) == tc]
+    return hits[0] if len(hits) == 1 else None
+
+
+def probe_frame(last_frame: int | None) -> int | None:
+    """A frame index whose timecode differs for every standard rate."""
+    limit = (last_frame or 1000) - 1
+    for frame in (1000, 997, 601, 487, 311, 241, 131, 121):
+        if frame <= limit and len({frames_to_timecode(frame, r) for r in STANDARD_RATES}) == len(STANDARD_RATES):
+            return frame
+    return None
+
+
+def rate_at_least(min_frames: int) -> int:
+    """Smallest standard rate that can show a frames field of `min_frames`."""
+    return next((r for r in STANDARD_RATES if r > min_frames), STANDARD_RATES[-1])
 
 
 def decode_u32(data: bytes) -> int | None:
@@ -270,7 +320,13 @@ class TransportStatus:
         return self.bit(4, 0)
 
     @property
+    def ejected(self) -> bool:
+        return self.bit(1, 4)
+
+    @property
     def state(self) -> str:
+        if self.ejected and not self.playing:
+            return "ejected"
         if self.playing and not self.still:
             return "playing"
         if self.still or (self.servo_lock and not self.stopped):

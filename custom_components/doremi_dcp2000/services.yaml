@@ -46,6 +46,12 @@ set_frame:
           max: 10000000
           mode: box
 
+measure_frame_rate:
+  target:
+    entity:
+      integration: doremi_dcp2000
+      domain: media_player
+
 step_back:
   target:
     entity:

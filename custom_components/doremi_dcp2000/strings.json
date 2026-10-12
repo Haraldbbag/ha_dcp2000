@@ -57,7 +57,9 @@
           "paused": "Paused",
           "cued": "Cued",
           "cueing": "Cueing",
-          "stopped": "Stopped"
+          "stopped": "Stopped",
+          "ejected": "Ejected",
+          "starting": "Starting …"
         }
       },
       "title": {
@@ -100,6 +102,14 @@
       },
       "spl_uuid": {
         "name": "SPL UUID"
+      },
+      "frame_rate": {
+        "name": "Frame rate",
+        "state_attributes": {
+          "source": {
+            "name": "Source"
+          }
+        }
       }
     },
     "binary_sensor": {
@@ -142,6 +152,9 @@
       },
       "spl_eject": {
         "name": "Eject SPL"
+      },
+      "measure_fps": {
+        "name": "Measure frame rate"
       }
     }
   },
@@ -278,6 +291,10 @@
           "description": "UUID of the show playlist."
         }
       }
+    },
+    "measure_frame_rate": {
+      "name": "Measure frame rate",
+      "description": "Determines the frame rate of the loaded clip (brief locate and back, only while paused). Stored per clip."
     }
   }
 }

@@ -19,12 +19,13 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from .coordinator import DCPConfigEntry, DCPCoordinator, DCPData
 from .entity import DCPEntity
 
-TRANSPORT_STATES = ["playing", "paused", "cued", "cueing", "stopped"]
+TRANSPORT_STATES = ["playing", "starting", "paused", "cued", "cueing", "stopped", "ejected"]
 
 
 @dataclass(frozen=True, kw_only=True)
 class DCPSensorDescription(SensorEntityDescription):
     value_fn: Callable[[DCPData], Any]
+    attr_fn: Callable[[DCPData], dict[str, Any]] | None = None
     klv_only: bool = False
     gpio_only: bool = False
 
@@ -54,6 +55,11 @@ SENSORS: tuple[DCPSensorDescription, ...] = (
     DCPSensorDescription(
         key="remaining", translation_key="remaining", device_class=SensorDeviceClass.DURATION,
         native_unit_of_measurement=UnitOfTime.SECONDS, value_fn=_remaining,
+    ),
+    DCPSensorDescription(
+        key="frame_rate", translation_key="frame_rate", native_unit_of_measurement="fps",
+        value_fn=lambda d: d.fps if d.clip_id else None,
+        attr_fn=lambda d: {"source": d.fps_source},
     ),
     DCPSensorDescription(
         key="frame", translation_key="frame", entity_category=EntityCategory.DIAGNOSTIC,
@@ -104,3 +110,8 @@ class DCPSensor(DCPEntity, SensorEntity):
     @property
     def native_value(self) -> Any:
         return self.entity_description.value_fn(self.coordinator.data)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        fn = self.entity_description.attr_fn
+        return fn(self.coordinator.data) if fn else None

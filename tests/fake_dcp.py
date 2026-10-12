@@ -26,7 +26,12 @@ CLIPS = {
     b"SPOT1\x00\x00\x00": ("Werbung Sommer", uuid.UUID("11111111-2222-3333-4444-555555555555"), 1440),
     b"TRAILER2": ("Trailer Herbst", uuid.UUID("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"), 3600),
     b"FEATURE\x00": ("Hauptfilm", uuid.UUID("12345678-1234-1234-1234-123456789abc"), 172800),
+    b"KDMLESS\x00": ("Ohne KDM", uuid.UUID("deadbeef-0000-0000-0000-000000000000"), 1000),
 }
+FPS = {b"TRAILER2": 25}  # everything else 24
+NO_KDM = {b"KDMLESS\x00"}
+# Real DCP-2000 firmware answers 60.A2 (current frame) with 0; mimic that.
+BROKEN_CURRENT_FRAME = True
 
 
 class State:
@@ -39,6 +44,7 @@ class State:
         self.gpo = 0
         self.gpi = 0b00000101
         self.list_pos = 0
+        self.ejected = False
         self.log: list[str] = []
 
     def tick(self) -> None:
@@ -47,6 +53,9 @@ class State:
 
     def status_bytes(self) -> bytes:
         b = bytearray(10)
+        if self.ejected:
+            b[1] |= 0x10
+            return bytes(b)
         if self.playing:
             b[1] |= 0x01
             b[2] |= 0x80
@@ -113,7 +122,10 @@ def handle_s9p(st: State, frame: bytes) -> bytes:
     if key == p.CMD_IN_PRESET:
         if r.data[:8] not in CLIPS:
             return NAK
-        st.clip, st.frame, st.playing, st.still = r.data[:8], 0, False, False
+        if r.data[:8] in NO_KDM:
+            st.clip, st.playing, st.ejected = None, False, True
+            return ACK
+        st.clip, st.frame, st.playing, st.still, st.ejected = r.data[:8], 0, False, True, False
         return ACK
     if key in (p.CMD_OUT_PRESET, p.CMD_PREVIEW_IN, p.CMD_PREVIEW_OUT):
         return ACK
@@ -121,12 +133,11 @@ def handle_s9p(st: State, frame: bytes) -> bytes:
         start, count = r.data[0] >> 4, r.data[0] & 0x0F
         return reply(0x7, 0x20, st.status_bytes()[start:start + count])
     if key == p.CMD_CURRENT_FRAME:
-        return reply(0x7, 0xA2, st.frame.to_bytes(4, "big"))
+        return reply(0x7, 0xA2, (0 if BROKEN_CURRENT_FRAME else st.frame).to_bytes(4, "big"))
     if key == p.CMD_LAST_FRAME:
         return reply(0x7, 0xB5, (CLIPS[st.clip][2] if st.clip else 0).to_bytes(4, "big"))
     if key == p.CMD_CURRENT_TIME_SENSE:
-        f = st.frame
-        tc = [f % 24, (f // 24) % 60, (f // 1440) % 60, f // 86400]
+        tc = list(reversed(p.frames_to_timecode(st.frame, FPS.get(st.clip, 24))))
         return reply(0x7, 0x04, bytes(int(str(v), 16) for v in tc))
     if key == p.CMD_LOADED_ID:
         return reply(0x8, 0xC1, st.clip or b"\x00" * 8)

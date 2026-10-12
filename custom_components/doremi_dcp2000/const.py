@@ -17,3 +17,4 @@ CONF_KLV_PORT = "klv_port"
 CONF_KLV_REG = "klv_reg"
 
 GPIO_LINES = 8
+START_TIMEOUT = 90  # seconds the server may spend on security checks after Play

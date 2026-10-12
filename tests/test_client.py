@@ -26,29 +26,48 @@ def test_frames_match_docs():
 
 async def _scenario():
     st, s1, s2 = await fake_dcp.start("127.0.0.1", 15000, 15730)
-    async with s1, s2:
+    try:
+        await _steps(st)
+    finally:
+        s1.close()
+        s2.close()
+
+
+async def _steps(st):
         c = DCP2000Client("127.0.0.1", 15000)
         info = await c.device_info()
         assert info.product == "DCP2000" and info.serial == "123456" and info.protocol_version == "1.05"
         assert await c.tcp_protocol_version() == "1.3"
         clips = await c.list_clips()
         assert clips == sorted(fake_dcp.CLIPS)
+        # clip without KDM -> server ejects -> clear error
+        try:
+            await c.cue_clip(b"KDMLESS\x00", timeout=3)
+        except DCPCommandError as err:
+            assert "could not load" in str(err)
+        else:
+            raise AssertionError("expected load failure")
+        assert (await c.status()).state == "ejected"
         assert await c.loaded_id() is None
-        assert (await c.status()).state == "stopped"
 
         await c.cue_clip(b"TRAILER2", 240)
         assert await c.loaded_id() == b"TRAILER2"
-        assert await c.current_frame() == 240
+        assert await c.current_frame() == 0  # firmware quirk, see fake_dcp
+        assert await c.timecode() == "00:00:09:15"  # 240 frames @ 25 fps
+        assert await c.measure_fps(3600) == 25
+        assert st.frame == 240  # position restored
+        await c.cue_clip(b"SPOT1\x00\x00\x00")
+        assert await c.measure_fps(1440) == 24
+        await c.cue_clip(b"TRAILER2", 240)
         assert await c.last_frame() == 3600
         assert await c.current_uuid() == "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
         assert await c.uuid_for_id(b"FEATURE\x00") == "12345678-1234-1234-1234-123456789abc"
         assert await c.current_title() == "Trailer Herbst"
-        assert (await c.status()).state == "cued"
+        assert (await c.status()).state == "paused"  # real server: still after cue
 
         await c.play()
         assert (await c.status()).state == "playing"
-        f1 = await c.current_frame()
-        assert f1 > 240
+        assert st.frame > 240 and await c.timecode() != "00:00:09:15"
         await c.pause()
         assert (await c.status()).state == "paused"
         assert await c.timecode() is not None
@@ -78,7 +97,7 @@ async def _scenario():
         assert await probe_klv("127.0.0.1", 15999, timeout=0.5) is None
         k = KLVClient("127.0.0.1", 15730)
         cpls = await k.get_cpl_list()
-        assert len(cpls) == 3
+        assert len(cpls) == len(fake_dcp.CLIPS)
         info = await k.get_cpl("12345678-1234-1234-1234-123456789abc")
         assert info.title == "Hauptfilm" and info.fps == 24 and info.kind == "feature"
         assert info.width == 2048 and info.channels == 6 and not info.encrypted

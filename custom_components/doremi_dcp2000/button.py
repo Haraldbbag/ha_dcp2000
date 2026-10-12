@@ -45,6 +45,11 @@ BUTTONS: tuple[DCPButtonDescription, ...] = (
         press_fn=lambda c: c.client.step_back(),
     ),
     DCPButtonDescription(
+        key="measure_fps", translation_key="measure_fps",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        press_fn=lambda c: c.async_measure_fps(),
+    ),
+    DCPButtonDescription(
         key="refresh_library", translation_key="refresh_library",
         entity_category=EntityCategory.DIAGNOSTIC,
         press_fn=lambda c: c.async_refresh_library(),

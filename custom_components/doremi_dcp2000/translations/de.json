@@ -57,7 +57,9 @@
           "paused": "Pause",
           "cued": "Geladen",
           "cueing": "Lädt",
-          "stopped": "Gestoppt"
+          "stopped": "Gestoppt",
+          "ejected": "Ausgeworfen",
+          "starting": "Startet …"
         }
       },
       "title": {
@@ -100,6 +102,14 @@
       },
       "spl_uuid": {
         "name": "SPL UUID"
+      },
+      "frame_rate": {
+        "name": "Bildrate",
+        "state_attributes": {
+          "source": {
+            "name": "Quelle"
+          }
+        }
       }
     },
     "binary_sensor": {
@@ -142,6 +152,9 @@
       },
       "spl_eject": {
         "name": "SPL auswerfen"
+      },
+      "measure_fps": {
+        "name": "Bildrate messen"
       }
     }
   },
@@ -278,6 +291,10 @@
           "description": "UUID der Show-Playlist."
         }
       }
+    },
+    "measure_frame_rate": {
+      "name": "Bildrate messen",
+      "description": "Ermittelt die Bildrate des geladenen Clips (kurzer Sprung und zurück, nur in Pause). Das Ergebnis wird je Clip gespeichert."
     }
   }
 }

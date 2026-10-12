@@ -18,10 +18,14 @@ from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import config_validation as cv, entity_platform
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
+import logging
+
 from . import protocol as p
 from .client import DCPError
 from .coordinator import DCPConfigEntry, DCPCoordinator
 from .entity import DCPEntity
+
+_LOGGER = logging.getLogger(__name__)
 
 STATE_MAP = {
     "playing": MediaPlayerState.PLAYING,
@@ -29,6 +33,8 @@ STATE_MAP = {
     "cued": MediaPlayerState.IDLE,
     "cueing": MediaPlayerState.BUFFERING,
     "stopped": MediaPlayerState.IDLE,
+    "ejected": MediaPlayerState.IDLE,
+    "starting": MediaPlayerState.BUFFERING,
 }
 
 
@@ -55,6 +61,10 @@ async def async_setup_entry(
         "async_set_frame",
     )
     platform.async_register_entity_service("step_back", None, "async_step_back")
+    platform.async_register_entity_service(
+        "measure_frame_rate", None, "async_measure_frame_rate",
+        supports_response=SupportsResponse.OPTIONAL,
+    )
     platform.async_register_entity_service(
         "projector_channel",
         {vol.Required("channel"): vol.All(vol.Coerce(int), vol.Range(min=0, max=255))},
@@ -183,8 +193,10 @@ class DCPMediaPlayer(DCPEntity, MediaPlayerEntity):
             "last_frame": d.last_frame,
             "timecode": d.timecode,
             "frame_rate": d.fps,
+            "frame_rate_source": d.fps_source,
             "transport": d.state,
             "auto_mode": d.status.auto_mode,
+            "status_bytes": d.status.raw.hex(" "),
         }
         if d.cpl:
             attrs |= {
@@ -204,7 +216,9 @@ class DCPMediaPlayer(DCPEntity, MediaPlayerEntity):
     # -- transport ----------------------------------------------------------
 
     async def async_media_play(self) -> None:
-        await self._run(self.coordinator.client.play())
+        await self._run(self.coordinator.client.play(), refresh=False)
+        self.coordinator.mark_start_requested()
+        await self.coordinator.async_request_refresh()
 
     async def async_media_pause(self) -> None:
         await self._run(self.coordinator.client.pause())
@@ -234,9 +248,16 @@ class DCPMediaPlayer(DCPEntity, MediaPlayerEntity):
         raw = self.coordinator.clip_by_name(clip)
 
         async def _do():
-            await client.cue_clip(raw, start_frame or None)
+            await client.cue_clip(raw)
+            try:  # cheap and exact: learn the edit rate while we own the transport
+                await self.coordinator.async_measure_fps(force=False)
+            except DCPError as err:
+                _LOGGER.debug("Frame rate measurement skipped: %s", err)
+            if start_frame:
+                await client.set_frame(start_frame)
             if autoplay:
                 await client.play()
+                self.coordinator.mark_start_requested()
 
         await self._run(_do())
 
@@ -245,6 +266,10 @@ class DCPMediaPlayer(DCPEntity, MediaPlayerEntity):
 
     async def async_set_frame(self, frame: int) -> None:
         await self._run(self.coordinator.client.set_frame(frame))
+
+    async def async_measure_frame_rate(self) -> ServiceResponse:
+        rate = await self._run(self.coordinator.async_measure_fps())
+        return {"clip_id": self.coordinator.data.clip_name, "frame_rate": rate}
 
     async def async_step_back(self) -> None:
         await self._run(self.coordinator.client.step_back())
@@ -291,7 +316,7 @@ class DCPMediaPlayer(DCPEntity, MediaPlayerEntity):
     async def async_spl_command(self, command: str) -> None:
         klv = self._require_klv()
         actions = {
-            "play": lambda: klv.simple("PlaySPL"),
+            "play": lambda: self._spl_play(klv),
             "pause": lambda: klv.simple("PauseSPL"),
             "eject": lambda: klv.simple("EjectSPL"),
             "skip_forward": lambda: klv.simple("SkipForward"),
@@ -300,6 +325,11 @@ class DCPMediaPlayer(DCPEntity, MediaPlayerEntity):
             "loop_off": lambda: klv.loop_mode(False),
         }
         await self._run(actions[command]())
+
+    async def _spl_play(self, klv):
+        result = await klv.simple("PlaySPL")
+        self.coordinator.mark_start_requested()
+        return result
 
     async def async_spl_jump(self, seconds: int) -> None:
         await self._run(self._require_klv().jump(seconds))

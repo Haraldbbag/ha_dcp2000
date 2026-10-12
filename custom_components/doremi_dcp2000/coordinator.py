@@ -9,6 +9,7 @@ import time
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
@@ -22,6 +23,7 @@ from .const import (
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
     LIBRARY_REFRESH,
+    START_TIMEOUT,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -38,14 +40,19 @@ class DCPData:
     title: str | None = None
     cpl: p.CplInfo | None = None
     fps: float = DEFAULT_FPS
+    fps_source: str = "default"
     gpi: int | None = None
     spl: p.SplStatus | None = None
     clips: dict[str, bytes] = field(default_factory=dict)
     position_updated_at: datetime | None = None
+    starting: bool = False
 
     @property
     def state(self) -> str:
-        return self.status.state
+        state = self.status.state
+        if self.starting and state != "playing":
+            return "starting"
+        return state
 
     @property
     def clip_name(self) -> str | None:
@@ -95,12 +102,27 @@ class DCPCoordinator(DataUpdateCoordinator[DCPData]):
         self.info = info
         self.gpio_enabled: bool = entry.options.get(CONF_GPIO, False)
         self.default_fps: float = float(entry.options.get(CONF_FPS, DEFAULT_FPS))
+        self._start_requested: float | None = None
         self.gpo_state: int = 0  # the device cannot report outputs; we remember them
         self._library_at = 0.0
         self._ext_supported = True
         self._klv_warned = False
         self._titles: dict[bytes, str | None] = {}
+        # Per-clip knowledge that survives restarts: {clip_id: {title, fps, fps_source}}
+        self._store: Store[dict] = Store(hass, 1, f"{DOMAIN}.{entry.entry_id}")
+        self._cache: dict[str, dict] = {}
         self.data = DCPData(fps=self.default_fps)
+
+    async def async_load_cache(self) -> None:
+        self._cache = (await self._store.async_load() or {}).get("clips", {})
+
+    def _remember(self, clip: bytes, **values) -> None:
+        key = p.clip_id_to_str(clip)
+        entry = self._cache.setdefault(key, {})
+        if all(entry.get(k) == v for k, v in values.items()):
+            return
+        entry.update(values)
+        self._store.async_delay_save(lambda: {"clips": self._cache}, 10)
 
     async def async_shutdown(self) -> None:
         await super().async_shutdown()
@@ -119,19 +141,31 @@ class DCPCoordinator(DataUpdateCoordinator[DCPData]):
         c = self.client
         data = replace(prev)
         data.status = await c.status()
-        data.frame = await c.current_frame()
+        self._update_starting(data)
         data.position_updated_at = dt_util.utcnow()
         try:
-            data.timecode = await c.timecode()
+            tc = await c.timecode_parts()
         except DCPCommandError:
-            data.timecode = None
+            tc = None
+        data.timecode = p.format_timecode(tc)
         data.clip_id = await c.loaded_id()
 
         if data.clip_id != prev.clip_id or (data.clip_id and data.last_frame is None):
             await self._load_clip_details(data)
         elif data.clip_id is None:
             data.last_frame = data.uuid = data.title = data.cpl = None
-            data.fps = self.default_fps
+            data.fps, data.fps_source = self.default_fps, "default"
+
+        # Passive learning: a frames field >= fps proves a higher rate.
+        if tc and data.clip_id and data.fps_source in ("default", "learned") and tc[3] >= data.fps:
+            data.fps, data.fps_source = float(p.rate_at_least(tc[3])), "learned"
+            self._remember(data.clip_id, fps=data.fps, fps_source="learned")
+
+        # 60.A2 (current frame) returns 0 on some firmware -> derive from timecode.
+        frame = await c.current_frame()
+        if not frame and tc is not None:
+            frame = p.timecode_to_frames(tc, data.fps)
+        data.frame = frame
 
         if self.gpio_enabled:
             try:
@@ -157,10 +191,13 @@ class DCPCoordinator(DataUpdateCoordinator[DCPData]):
     async def _load_clip_details(self, data: DCPData) -> None:
         c = self.client
         data.uuid = data.title = data.cpl = None
-        data.fps = self.default_fps
+        data.fps, data.fps_source = self.default_fps, "default"
         if data.clip_id is None:
             data.last_frame = None
             return
+        cached = self._cache.get(p.clip_id_to_str(data.clip_id), {})
+        if cached.get("fps"):
+            data.fps, data.fps_source = float(cached["fps"]), cached.get("fps_source", "cache")
         try:
             data.last_frame = await c.last_frame()
         except DCPCommandError:
@@ -175,10 +212,17 @@ class DCPCoordinator(DataUpdateCoordinator[DCPData]):
         if self.klv and data.uuid:
             try:
                 data.cpl = await self.klv.get_cpl(data.uuid)
-                data.fps = data.cpl.fps or self.default_fps
+                if data.cpl.fps:
+                    data.fps, data.fps_source = data.cpl.fps, "cpl"
                 data.title = data.title or data.cpl.title
             except (DCPError, ValueError) as err:
                 _LOGGER.debug("GetCPL failed: %s", err)
+        if data.title:
+            self._titles[data.clip_id] = data.title
+            self._remember(data.clip_id, title=data.title)
+            label = p.clip_id_to_str(data.clip_id)
+            data.clips = {k: v for k, v in data.clips.items() if v != data.clip_id}
+            data.clips[f"{label} – {data.title}"] = data.clip_id
 
     async def _refresh_library(self, data: DCPData) -> None:
         try:
@@ -198,7 +242,10 @@ class DCPCoordinator(DataUpdateCoordinator[DCPData]):
         """Title of a clip that is not loaded (needs the KLV API)."""
         if clip in self._titles:
             return self._titles[clip]
-        title = None
+        title = self._cache.get(p.clip_id_to_str(clip), {}).get("title")
+        if title:
+            self._titles[clip] = title
+            return title
         if self.klv and self._ext_supported:
             try:
                 uuid = await self.client.uuid_for_id(clip)
@@ -209,10 +256,57 @@ class DCPCoordinator(DataUpdateCoordinator[DCPData]):
         self._titles[clip] = title
         return title
 
+    def mark_start_requested(self) -> None:
+        """Play was sent; the server may need up to ~30 s of checks before it runs."""
+        self._start_requested = time.monotonic()
+        if self.data:
+            self.data.starting = True
+            self.async_update_listeners()
+
+    def _update_starting(self, data: DCPData) -> None:
+        if self._start_requested is None:
+            data.starting = False
+            return
+        waited = time.monotonic() - self._start_requested
+        if data.status.playing or data.status.ejected:
+            self._start_requested = None
+        elif waited > START_TIMEOUT:
+            _LOGGER.warning("%s did not start playback within %d s (status %s)",
+                            self.client.host, START_TIMEOUT, data.status.raw.hex(" "))
+            self._start_requested = None
+        data.starting = self._start_requested is not None
+
     async def async_refresh_library(self) -> None:
         self._library_at = 0.0
         self._titles.clear()
         await self.async_request_refresh()
+
+    async def async_measure_fps(self, force: bool = True) -> int | None:
+        """Measure the edit rate of the loaded clip (not while playing).
+
+        With force=False a clip whose rate is already measured/known is skipped.
+        """
+        c = self.client
+        clip = await c.loaded_id()
+        if clip is None:
+            raise DCPCommandError("no clip loaded")
+        cached = self._cache.get(p.clip_id_to_str(clip), {})
+        if not force and cached.get("fps_source") in ("measured", "cpl"):
+            return int(cached["fps"])
+        if (await c.status()).state == "playing":
+            raise DCPCommandError("frame rate can only be measured while paused/cued")
+        rate = await c.measure_fps(await c.last_frame())
+        _LOGGER.debug("Measured %s fps for %s", rate, p.clip_id_to_str(clip))
+        if rate:
+            self._remember(clip, fps=float(rate), fps_source="measured")
+            if self.data and self.data.clip_id == clip:
+                self.data.fps, self.data.fps_source = float(rate), "measured"
+                self.async_update_listeners()
+        return rate
+
+    def cached_fps(self, clip: bytes) -> float | None:
+        fps = self._cache.get(p.clip_id_to_str(clip), {}).get("fps")
+        return float(fps) if fps else None
 
     def clip_by_name(self, name: str) -> bytes:
         """Accept a library label, a bare clip id or a CPL title."""

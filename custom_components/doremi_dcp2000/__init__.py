@@ -37,6 +37,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: DCPConfigEntry) -> bool:
         )
 
     coordinator = DCPCoordinator(hass, entry, client, klv, info)
+    await coordinator.async_load_cache()
     await coordinator.async_config_entry_first_refresh()
     entry.runtime_data = coordinator
 
