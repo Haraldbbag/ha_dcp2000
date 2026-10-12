@@ -5,14 +5,14 @@
  *   type: custom:doremi-dcp2000-card
  *   entity: media_player.dcp_2000
  */
-const CARD_VERSION = "0.7.4";
+const CARD_VERSION = "0.7.5";
 
 const TEXT = {
   de: {
     playing: "Wiedergabe", paused: "Pause", starting: "Startet …", cued: "Geladen",
     cueing: "Lädt …", stopped: "Gestoppt", ejected: "Leer", off: "Nicht erreichbar",
     remaining: "Rest", nothing: "Kein Inhalt geladen", noSpl: "Keine Show-Playlist geladen",
-    prev: "Vorheriger Clip", next: "Nächster Clip", play: "Abspielen", pause: "Pause",
+    prev: "Zum Clipanfang (am Anfang: vorheriger Clip)", next: "Nächster Clip", play: "Abspielen", pause: "Pause",
     eject: "Auswerfen", ejectLoad: "Auswerfen / Inhalt laden",
     confirmEject: "Der Server spielt gerade. Wirklich auswerfen? Die Vorstellung wird abgebrochen.",
     load: "Inhalt laden", search: "Suchen …", cancel: "Abbrechen", loading: "Lade Bibliothek …",
@@ -26,7 +26,7 @@ const TEXT = {
     playing: "Playing", paused: "Pause", starting: "Starting …", cued: "Loaded",
     cueing: "Loading …", stopped: "Stopped", ejected: "Empty", off: "Unreachable",
     remaining: "remaining", nothing: "Nothing loaded", noSpl: "No show playlist loaded",
-    prev: "Previous clip", next: "Next clip", play: "Play", pause: "Pause",
+    prev: "To clip start (at the start: previous clip)", next: "Next clip", play: "Play", pause: "Pause",
     eject: "Eject", ejectLoad: "Eject / load content",
     confirmEject: "The server is playing. Really eject? The show will be stopped.",
     load: "Load content", search: "Search …", cancel: "Cancel", loading: "Loading library …",
@@ -122,7 +122,8 @@ button.ctl { width:56px; height:44px; border-radius:10px; border:1px solid var(-
 button.ctl svg { width:28px; height:28px; fill:var(--primary-color,#03a9f4); }
 button.ctl:disabled { cursor:default; opacity:0.35; }
 button.ctl:not(:disabled):hover { background:var(--divider-color,#e0e0e0); }
-button.ctl.busy { opacity:0.6; }
+button.ctl.busy { opacity:0.55; cursor:progress; animation:dcp-pulse 1s ease-in-out infinite; }
+@keyframes dcp-pulse { 50% { opacity:0.25; } }
 .error { color:var(--error-color,#db4437); font-size:0.85em; margin-top:8px; text-align:center; min-height:1em; }
 dialog { border:none; border-radius:16px; padding:0; width:min(640px, 94vw); max-height:94vh;
   box-sizing:border-box; flex-direction:column;
@@ -292,9 +293,15 @@ class DoremiDcp2000Card extends HTMLElement {
     $("clipTitle").title = s.title || "";
     $("splTitle").textContent = s.splTitle || (s.splLoaded ? "" : t.noSpl);
     const pp = $("playpause");
-    const showPause = s.playing || s.transport === "starting";
+    const running = s.playing || s.transport === "starting";
+    const pend = this._pending;
+    if (pend && (Date.now() > pend.until || (pend.want === "play") === running)) {
+      this._pending = null; // reached (or gave up): follow the server again
+    }
+    const showPause = this._pending ? this._pending.want === "play" : running;
     pp.innerHTML = svg(showPause ? ICONS.pause : ICONS.play);
     pp.title = showPause ? t.pause : t.play;
+    pp.classList.toggle("busy", !!this._pending);
     pp.disabled = s.transport === "off" || s.a.mode === "empty";
     $("prev").disabled = s.a.mode === "empty" || s.transport === "off";
     $("next").disabled = !s.splLoaded || s.idx == null || s.idx >= s.items.length - 1;
@@ -378,9 +385,12 @@ class DoremiDcp2000Card extends HTMLElement {
 
   _playPause() {
     const s = this._snap;
-    if (!s) return;
-    if (s.playing || s.transport === "starting") this._call("media_player", "media_pause");
-    else this._call("media_player", "media_play");
+    if (!s || this._pending) return; // one command at a time, no accidental toggling back
+    const want = s.playing || s.transport === "starting" ? "pause" : "play";
+    this._pending = { want, until: Date.now() + 8000 };
+    this._update();
+    this._call("media_player", want === "play" ? "media_play" : "media_pause")
+      .catch(() => { this._pending = null; this._update(); });
   }
 
   _eject() {

@@ -168,7 +168,7 @@ class DCPMediaPlayer(DCPEntity, MediaPlayerEntity):
         except DCPError as err:
             raise HomeAssistantError(f"DCP-2000: {err}") from err
         if refresh:
-            await self.coordinator.async_request_refresh()
+            self.coordinator.start_burst()
         return result
 
     def _require_klv(self):
@@ -291,13 +291,10 @@ class DCPMediaPlayer(DCPEntity, MediaPlayerEntity):
             return
         await self._run(self.coordinator.client.play(), refresh=False)
         self.coordinator.mark_start_requested()
-        await self.coordinator.async_request_refresh()
+        self.coordinator.start_burst()
 
     async def async_media_pause(self) -> None:
-        if self.coordinator.spl_loaded:
-            await self._run(self.coordinator.klv.simple("PauseSPL"))
-            return
-        await self._run(self.coordinator.client.pause())
+        await self._run(self.coordinator.async_pause(), refresh=False)
 
     async def async_media_stop(self) -> None:
         await self._run(self.coordinator.client.stop())
@@ -315,10 +312,7 @@ class DCPMediaPlayer(DCPEntity, MediaPlayerEntity):
         await self._run(self._require_klv().simple("SkipForward"))
 
     async def async_media_previous_track(self) -> None:
-        if not self.coordinator.spl_loaded:  # single clip: back to its start
-            await self._run(self.coordinator.client.locate(0))
-            return
-        await self._run(self._require_klv().simple("SkipBackward"))
+        await self._run(self.coordinator.async_previous(), refresh=False)
 
     # -- services -----------------------------------------------------------
 

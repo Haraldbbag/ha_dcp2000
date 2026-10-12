@@ -23,7 +23,10 @@ from .const import (
     DEFAULT_FPS,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
+    BURST_INTERVAL,
+    BURST_SECONDS,
     LIBRARY_REFRESH,
+    PREVIOUS_THRESHOLD,
     START_TIMEOUT,
 )
 
@@ -119,6 +122,8 @@ class DCPCoordinator(DataUpdateCoordinator[DCPData]):
         self.default_fps: float = float(entry.options.get(CONF_FPS, DEFAULT_FPS))
         self._start_requested: float | None = None
         self._start_park = False
+        self._burst_task: asyncio.Task | None = None
+        self._burst_until = 0.0
         self._spl_autoplay_until: float | None = None
         self._spl_items_uuid: str | None = None
         self._spl_xml: dict[str, str] = {}
@@ -437,7 +442,7 @@ class DCPCoordinator(DataUpdateCoordinator[DCPData]):
         await klv.simple("PlaySPL")
         if before.state != "paused" and autoplay:
             self._spl_autoplay_until = time.monotonic() + START_TIMEOUT
-        await self.async_request_refresh()
+        self.start_burst()
 
     async def _update_spl_items(self, data: DCPData) -> None:
         """Keep the event list of the loaded SPL and the current position in it."""
@@ -499,7 +504,28 @@ class DCPCoordinator(DataUpdateCoordinator[DCPData]):
             await self.klv.simple("PlaySPL")
         except DCPError as err:
             _LOGGER.warning("Second PlaySPL failed: %s", err)
-        await self.async_request_refresh()
+        self.start_burst()
+
+    # -- fast polling after transport commands ----------------------------------
+
+    def start_burst(self, seconds: float = BURST_SECONDS, interval: float = BURST_INTERVAL) -> None:
+        """Poll every `interval` s for `seconds` so the UI follows a command quickly.
+
+        async_request_refresh() is debounced (one immediate refresh, then 10 s
+        cooldown), which made Play/Pause look unreliable.
+        """
+        if self._burst_task and not self._burst_task.done():
+            self._burst_until = time.monotonic() + seconds
+            return
+        self._burst_until = time.monotonic() + seconds
+        self._burst_task = self.config_entry.async_create_background_task(
+            self.hass, self._burst(interval), "doremi_dcp2000 fast poll"
+        )
+
+    async def _burst(self, interval: float) -> None:
+        while time.monotonic() < self._burst_until:
+            await self.async_refresh()
+            await asyncio.sleep(interval)
 
     # -- operations used by the dashboard card ---------------------------------
 
@@ -542,7 +568,7 @@ class DCPCoordinator(DataUpdateCoordinator[DCPData]):
             self.mark_start_requested()
         else:
             await self._pause_confirmed()
-        await self.async_request_refresh()
+        self.start_burst()
 
     async def _pause_confirmed(self, tries: int = 6) -> None:
         """Right after cueing the server ignores STILL for a moment: repeat until paused."""
@@ -577,7 +603,7 @@ class DCPCoordinator(DataUpdateCoordinator[DCPData]):
             await self.klv.jump_to_timecode(f"{h:02d}:{m:02d}:{s:02d}.{f:02d}")
         else:
             await self.client.locate(frame)
-        await self.async_request_refresh()
+        self.start_burst()
 
     async def async_skip_to_event(self, event_id: str | None = None, index: int | None = None) -> None:
         if self.klv is None:
@@ -588,7 +614,31 @@ class DCPCoordinator(DataUpdateCoordinator[DCPData]):
                 raise DCPCommandError("unknown SPL event")
             event_id = items[index]["event_id"]
         await self.klv.skip_to_event(event_id)
-        await self.async_request_refresh()
+        self.start_burst()
+
+    async def async_previous(self, threshold: float = PREVIOUS_THRESHOLD) -> None:
+        """Back to the start of the current clip; already there -> previous clip."""
+        fps = self.current_fps()
+        try:
+            tc = await self.client.timecode_parts()
+        except DCPCommandError:
+            tc = None
+        position = p.timecode_to_frames(tc, fps) / fps if tc else 0.0
+        if self.spl_loaded:
+            if position > threshold:
+                await self.klv.jump_to_timecode("00:00:00.00")
+            else:
+                await self.klv.simple("SkipBackward")
+        else:
+            await self.client.locate(0)
+        self.start_burst()
+
+    async def async_pause(self) -> None:
+        if self.spl_loaded:
+            await self.klv.simple("PauseSPL")
+        else:
+            await self._pause_confirmed(tries=3)
+        self.start_burst()
 
     async def async_eject(self) -> None:
         if self.spl_loaded:
@@ -596,7 +646,7 @@ class DCPCoordinator(DataUpdateCoordinator[DCPData]):
         else:
             await self.client.eject()
         self._start_requested = None
-        await self.async_request_refresh()
+        self.start_burst()
 
     def library(self) -> dict:
         """CPLs and SPLs for the load dialog."""

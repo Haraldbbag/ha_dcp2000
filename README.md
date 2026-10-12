@@ -79,7 +79,9 @@ entity: media_player.kino_1
 - Oben der aktuelle Clip (bzw. das aktuelle SPL-Element), darunter die ganze
   SPL: links Timecode / Länge, rechts Restzeit, Balken mit Prozent.
 - Rechts die Events der geladenen SPL mit Automation-Cues; das laufende ist markiert.
-- Knöpfe: vorheriger Clip, Play/Pause, Auswerfen, nächster Clip.
+- Knöpfe: zurück (zum Anfang des Clips; steht man schon in den ersten 3 s: vorheriger
+  Clip), Play/Pause, Auswerfen, nächster Clip. Nach jedem Befehl fragt die Integration
+  8 s lang alle 0,5 s den Status ab, damit die Anzeige sofort folgt.
 - **Auswerfen:** bei Wiedergabe mit Sicherheitsabfrage; bei Pause sofort;
   sonst öffnet sich der Ladedialog (Reiter CPL / SPL, Suche). Bei einer SPL
   werden vor dem Laden ihre Automation-Cues angezeigt. „Abspielen“ startet
