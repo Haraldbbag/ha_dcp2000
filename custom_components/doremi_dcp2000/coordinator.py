@@ -439,10 +439,33 @@ class DCPCoordinator(DataUpdateCoordinator[DCPData]):
             raise DCPCommandError("KLV API not enabled")
         before = await klv.status_spl()
         self.mark_start_requested(park=not autoplay)
-        await klv.simple("PlaySPL")
-        if before.state != "paused" and autoplay:
-            self._spl_autoplay_until = time.monotonic() + START_TIMEOUT
+        if before.state == "paused":
+            # Resume: should take effect at once. A PlaySPL sent shortly after
+            # PauseSPL is acknowledged but ignored by the DCP-2000 -> confirm/repeat.
+            self.start_burst()
+            await self._klv_confirmed("PlaySPL", "playing")
+        else:
+            await klv.simple("PlaySPL")  # first start: checks run, never repeat
+            if autoplay:
+                self._spl_autoplay_until = time.monotonic() + START_TIMEOUT
         self.start_burst()
+
+    async def _klv_confirmed(self, command: str, state: str, tries: int = 3,
+                             wait: float = 2.0) -> bool:
+        """Send an acknowledged-but-sometimes-ignored command until the state follows.
+
+        Only repeats after an *answered* command whose effect did not show; a
+        timeout still raises and is never repeated.
+        """
+        for attempt in range(tries):
+            await self.klv.simple(command)
+            if await self._wait_spl_state(state, wait):
+                return True
+            _LOGGER.debug("%s acknowledged but state is not %s (attempt %d)",
+                          command, state, attempt + 1)
+        _LOGGER.warning("%s: server did not change to %s after %d attempts",
+                        self.client.host, state, tries)
+        return False
 
     async def _update_spl_items(self, data: DCPData) -> None:
         """Keep the event list of the loaded SPL and the current position in it."""
@@ -630,11 +653,10 @@ class DCPCoordinator(DataUpdateCoordinator[DCPData]):
                 # plays: pause, jump, play again.
                 playing = (await self.klv.status_spl()).state == "playing"
                 if playing:
-                    await self.klv.simple("PauseSPL")
-                    await self._wait_spl_state("paused")
+                    await self._klv_confirmed("PauseSPL", "paused")
                 await self.klv.jump_to_timecode("00:00:00.00")
                 if playing:
-                    await self.klv.simple("PlaySPL")
+                    await self._klv_confirmed("PlaySPL", "playing")
             else:
                 await self.klv.simple("SkipBackward")
         else:
@@ -652,7 +674,8 @@ class DCPCoordinator(DataUpdateCoordinator[DCPData]):
 
     async def async_pause(self) -> None:
         if self.spl_loaded:
-            await self.klv.simple("PauseSPL")
+            self.start_burst()
+            await self._klv_confirmed("PauseSPL", "paused")
         else:
             await self._pause_confirmed(tries=3)
         self.start_burst()
