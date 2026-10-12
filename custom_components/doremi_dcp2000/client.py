@@ -208,9 +208,19 @@ class DCP2000Client:
             return None
         before = await self.timecode_parts()
         await self.set_frame(probe)
-        await asyncio.sleep(0.2)
-        after = await self.timecode_parts()
-        rate = p.match_rate(probe, after) if after else None
+        # The server needs a moment to locate; wait until the timecode settles.
+        rate = None
+        previous = None
+        for _ in range(15):
+            await asyncio.sleep(0.2)
+            after = await self.timecode_parts()
+            if after and after == previous and after != before:
+                rate = p.match_rate(probe, after)
+                break
+            previous = after
+        else:
+            if previous and previous != before:
+                rate = p.match_rate(probe, previous)
         if before is not None:
             await self.set_frame(p.timecode_to_frames(before, rate or 24))
         return rate

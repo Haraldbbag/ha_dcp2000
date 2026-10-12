@@ -214,9 +214,12 @@ def frames_to_timecode(frame: int, fps: int) -> Timecode:
     return hours, minutes, seconds, frames
 
 
-def match_rate(frame: int, tc: Timecode) -> int | None:
-    """Which standard rate turns `frame` into timecode `tc`?"""
-    hits = [r for r in STANDARD_RATES if frames_to_timecode(frame, r) == tc]
+def match_rate(frame: int, tc: Timecode, tolerance: int = 2) -> int | None:
+    """Which standard rate turns `frame` into timecode `tc` (± tolerance frames)?"""
+    hits = [
+        r for r in STANDARD_RATES
+        if tc[3] < r and abs(timecode_to_frames(tc, r) - frame) <= tolerance
+    ]
     return hits[0] if len(hits) == 1 else None
 
 
