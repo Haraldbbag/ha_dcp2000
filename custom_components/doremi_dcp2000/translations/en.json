@@ -191,6 +191,18 @@
         "loop_on": "Loop on",
         "loop_off": "Loop off"
       }
+    },
+    "content_kind": {
+      "options": {
+        "cpl": "CPL",
+        "spl": "Show playlist (SPL)"
+      }
+    },
+    "load_start": {
+      "options": {
+        "play": "Play",
+        "pause": "Pause on first frame"
+      }
     }
   },
   "services": {
@@ -321,6 +333,60 @@
     "measure_frame_rate": {
       "name": "Measure frame rate",
       "description": "Determines the frame rate of the loaded clip (brief locate and back, only while paused). Stored per clip."
+    },
+    "load_content": {
+      "name": "Load content",
+      "description": "Loads a CPL or a show playlist. Start 'play' runs it, 'pause' parks it on its first frame. An SPL with automation cues executes them when played.",
+      "fields": {
+        "kind": {
+          "name": "Type",
+          "description": "cpl or spl."
+        },
+        "id": {
+          "name": "Content",
+          "description": "Clip id, CPL title, SPL title or UUID."
+        },
+        "start": {
+          "name": "Start",
+          "description": "play or pause."
+        }
+      }
+    },
+    "seek": {
+      "name": "Seek",
+      "description": "Jumps inside the current clip / SPL element (SPL: JumpToTimeCode).",
+      "fields": {
+        "timecode": {
+          "name": "Timecode",
+          "description": "HH:MM:SS:FF"
+        },
+        "position": {
+          "name": "Position",
+          "description": "Seconds from the start of the clip."
+        }
+      }
+    },
+    "skip_to_event": {
+      "name": "Skip to SPL event",
+      "description": "Jumps to an event of the loaded SPL. Only while the show is paused.",
+      "fields": {
+        "event_id": {
+          "name": "Event ID",
+          "description": "UUID of the event."
+        },
+        "index": {
+          "name": "Index",
+          "description": "Position in the event list (0 = first)."
+        }
+      }
+    },
+    "eject": {
+      "name": "Eject",
+      "description": "Ejects the loaded SPL, or the clip if no SPL is loaded."
+    },
+    "get_library": {
+      "name": "Library",
+      "description": "Returns all CPLs and SPLs with titles for selection dialogs."
     }
   }
 }

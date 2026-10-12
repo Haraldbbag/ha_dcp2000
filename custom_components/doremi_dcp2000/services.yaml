@@ -167,3 +167,75 @@ spl_retrieve:
       required: true
       selector:
         text:
+
+load_content:
+  target:
+    entity:
+      integration: doremi_dcp2000
+      domain: media_player
+  fields:
+    kind:
+      required: true
+      default: cpl
+      selector:
+        select:
+          translation_key: content_kind
+          options: [cpl, spl]
+    id:
+      required: true
+      example: "Promo_Atmos_PL01"
+      selector:
+        text:
+    start:
+      default: pause
+      selector:
+        select:
+          translation_key: load_start
+          options: [play, pause]
+
+seek:
+  target:
+    entity:
+      integration: doremi_dcp2000
+      domain: media_player
+  fields:
+    timecode:
+      example: "00:01:30:12"
+      selector:
+        text:
+    position:
+      selector:
+        number:
+          min: 0
+          max: 86400
+          step: 0.01
+          unit_of_measurement: s
+          mode: box
+
+skip_to_event:
+  target:
+    entity:
+      integration: doremi_dcp2000
+      domain: media_player
+  fields:
+    event_id:
+      selector:
+        text:
+    index:
+      selector:
+        number:
+          min: 0
+          max: 999
+          mode: box
+
+eject:
+  target:
+    entity:
+      integration: doremi_dcp2000
+      domain: media_player
+
+get_library:
+  target:
+    entity:
+      integration: doremi_dcp2000
+      domain: media_player

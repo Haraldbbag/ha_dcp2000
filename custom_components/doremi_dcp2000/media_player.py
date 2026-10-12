@@ -103,6 +103,36 @@ async def async_setup_entry(
     platform.async_register_entity_service(
         "spl_jump", {vol.Required("seconds"): vol.Coerce(int)}, "async_spl_jump"
     )
+    # --- dashboard card ---
+    platform.async_register_entity_service(
+        "load_content",
+        {
+            vol.Required("kind"): vol.In(["cpl", "spl"]),
+            vol.Required("id"): cv.string,
+            vol.Optional("start", default="pause"): vol.In(["play", "pause"]),
+        },
+        "async_load_content",
+    )
+    platform.async_register_entity_service(
+        "seek",
+        {
+            vol.Exclusive("timecode", "pos"): cv.string,
+            vol.Exclusive("position", "pos"): vol.All(vol.Coerce(float), vol.Range(min=0)),
+        },
+        "async_seek",
+    )
+    platform.async_register_entity_service(
+        "skip_to_event",
+        {
+            vol.Exclusive("event_id", "event"): cv.string,
+            vol.Exclusive("index", "event"): vol.All(vol.Coerce(int), vol.Range(min=0)),
+        },
+        "async_skip_to_event",
+    )
+    platform.async_register_entity_service("eject", None, "async_eject")
+    platform.async_register_entity_service(
+        "get_library", None, "async_get_library", supports_response=SupportsResponse.ONLY
+    )
     platform.async_register_entity_service(
         "spl_retrieve", {vol.Required("spl_uuid"): cv.string}, "async_spl_retrieve",
         supports_response=SupportsResponse.ONLY,
@@ -160,21 +190,34 @@ class DCPMediaPlayer(DCPEntity, MediaPlayerEntity):
         return True  # show OFF instead of unavailable when the server is down
 
     @property
-    def media_title(self) -> str | None:
-        d = self.coordinator.data
-        return d.title or d.clip_name
-
-    @property
     def media_content_id(self) -> str | None:
         return self.coordinator.data.uuid or self.coordinator.data.clip_name
 
+    def _element(self) -> dict | None:
+        d = self.coordinator.data
+        if self.coordinator.spl_loaded and d.spl_index is not None and d.spl_items:
+            return d.spl_items[d.spl_index]
+        return None
+
     @property
     def media_duration(self) -> float | None:
+        item = self._element()
+        if item:
+            return item["duration"] or self.coordinator.data.spl.element_duration or None
         return self.coordinator.data.duration
 
     @property
     def media_position(self) -> float | None:
-        return self.coordinator.data.position
+        d = self.coordinator.data
+        if self._element() is not None and d.frame is not None:
+            return d.frame / self.coordinator.current_fps()
+        return d.position
+
+    @property
+    def media_title(self) -> str | None:
+        item = self._element()
+        d = self.coordinator.data
+        return (item and item["title"]) or d.title or d.clip_name
 
     @property
     def media_position_updated_at(self):
@@ -216,7 +259,26 @@ class DCPMediaPlayer(DCPEntity, MediaPlayerEntity):
                 "spl_title": self.coordinator.spl_label(d.spl.spl_uuid),
                 "spl_state": d.spl.state,
                 "spl_progress": d.spl.spl_percent,
+                "spl_position": d.spl.position,
+                "spl_duration": d.spl.duration,
+                "spl_index": d.spl_index,
+                "spl_items": [
+                    {
+                        "event_id": it["event_id"],
+                        "title": it["title"],
+                        "kind": it["kind"],
+                        "start": it["start"],
+                        "duration": it["duration"],
+                        "fps": it["fps"],
+                        "cues": it["cues"],
+                    }
+                    for it in d.spl_items
+                ] if d.spl.spl_uuid else [],
             }
+        attrs["edit_rate"] = self.coordinator.current_fps()
+        attrs["mode"] = (
+            "spl" if self.coordinator.spl_loaded else "clip" if d.clip_id else "empty"
+        )
         return attrs
 
     # -- transport ----------------------------------------------------------
@@ -231,13 +293,16 @@ class DCPMediaPlayer(DCPEntity, MediaPlayerEntity):
         await self.coordinator.async_request_refresh()
 
     async def async_media_pause(self) -> None:
+        if self.coordinator.spl_loaded:
+            await self._run(self.coordinator.klv.simple("PauseSPL"))
+            return
         await self._run(self.coordinator.client.pause())
 
     async def async_media_stop(self) -> None:
         await self._run(self.coordinator.client.stop())
 
     async def async_media_seek(self, position: float) -> None:
-        await self._run(self.coordinator.client.set_frame(round(position * self.coordinator.data.fps)))
+        await self._run(self.coordinator.async_seek(position=position), refresh=False)
 
     async def async_select_source(self, source: str) -> None:
         await self.async_cue_clip(source)
@@ -249,6 +314,9 @@ class DCPMediaPlayer(DCPEntity, MediaPlayerEntity):
         await self._run(self._require_klv().simple("SkipForward"))
 
     async def async_media_previous_track(self) -> None:
+        if not self.coordinator.spl_loaded:  # single clip: back to its start
+            await self._run(self.coordinator.client.locate(0))
+            return
         await self._run(self._require_klv().simple("SkipBackward"))
 
     # -- services -----------------------------------------------------------
@@ -349,6 +417,26 @@ class DCPMediaPlayer(DCPEntity, MediaPlayerEntity):
 
     async def async_spl_jump(self, seconds: int) -> None:
         await self._run(self._require_klv().jump(seconds))
+
+    async def async_load_content(self, kind: str, id: str, start: str = "pause") -> None:
+        if kind == "spl":
+            self._require_klv()
+        await self._run(self.coordinator.async_load_content(kind, id, start), refresh=False)
+
+    async def async_seek(self, timecode: str | None = None, position: float | None = None) -> None:
+        if timecode is None and position is None:
+            raise ServiceValidationError("Provide timecode or position.")
+        await self._run(self.coordinator.async_seek(timecode, position), refresh=False)
+
+    async def async_skip_to_event(self, event_id: str | None = None, index: int | None = None) -> None:
+        self._require_klv()
+        await self._run(self.coordinator.async_skip_to_event(event_id, index), refresh=False)
+
+    async def async_eject(self) -> None:
+        await self._run(self.coordinator.async_eject(), refresh=False)
+
+    async def async_get_library(self) -> ServiceResponse:
+        return self.coordinator.library()
 
     async def async_spl_retrieve(self, spl_uuid: str) -> ServiceResponse:
         xml = await self._run(self._require_klv().retrieve_spl(spl_uuid), refresh=False)

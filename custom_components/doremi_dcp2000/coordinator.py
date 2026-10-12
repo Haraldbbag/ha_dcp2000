@@ -495,6 +495,123 @@ class DCPCoordinator(DataUpdateCoordinator[DCPData]):
             _LOGGER.warning("Second PlaySPL failed: %s", err)
         await self.async_request_refresh()
 
+    # -- operations used by the dashboard card ---------------------------------
+
+    @property
+    def spl_loaded(self) -> bool:
+        d = self.data
+        return bool(self.klv and d and d.spl and d.spl.spl_uuid)
+
+    def current_fps(self) -> float:
+        """Edit rate of what is on screen (SPL element rate wins)."""
+        d = self.data
+        if d and d.spl_index is not None and d.spl_items:
+            fps = d.spl_items[d.spl_index].get("fps")
+            if fps:
+                return float(fps)
+        return d.fps if d else self.default_fps
+
+    async def async_load_content(self, kind: str, ident: str, start: str = "pause") -> None:
+        """Load a CPL or SPL; start='play' runs it, 'pause' parks it on its first frame."""
+        if kind == "spl":
+            if self.klv is None:
+                raise DCPCommandError("KLV API not enabled")
+            await self.klv.load_spl_uuid(self.spl_by_name(ident))
+            self._spl_items_uuid = None
+            if start == "play":
+                await self.async_spl_play()
+                return
+            try:
+                await self.klv.simple("PauseSPL")
+            except DCPError as err:  # some firmware only pauses a running show
+                _LOGGER.debug("PauseSPL after load: %s", err)
+            await self.async_request_refresh()
+            return
+        raw = self.clip_by_name(ident)
+        if self.spl_loaded:
+            await self.klv.simple("EjectSPL")
+        await self.client.cue_clip(raw)
+        try:
+            await self.async_measure_fps(force=False, delays=(1.0, 2.0))
+        except DCPError as err:
+            _LOGGER.debug("Frame rate measurement skipped: %s", err)
+        if start == "play":
+            await self.client.play()
+            self.mark_start_requested()
+        else:
+            await self.client.pause()
+        await self.async_request_refresh()
+
+    async def async_seek(self, timecode: str | None = None, position: float | None = None) -> None:
+        """Jump inside the current clip/element to a timecode or a position in seconds."""
+        fps = self.current_fps()
+        rate = round(fps)
+        if timecode:
+            parts = [int(x) for x in timecode.replace(".", ":").replace(";", ":").split(":")]
+            if len(parts) == 3:  # HH:MM:SS
+                parts.append(0)
+            parts = [0] * (4 - len(parts)) + parts
+            h, m, s, f = parts[-4:]
+            if f >= rate:
+                raise DCPCommandError(f"frame {f} is out of range for {fps:g} fps")
+            frame = ((h * 60 + m) * 60 + s) * rate + f
+        elif position is not None:
+            frame = round(max(0.0, position) * fps)
+        else:
+            raise DCPCommandError("timecode or position required")
+        if self.spl_loaded:
+            secs, f = divmod(frame, rate)
+            mins, s = divmod(secs, 60)
+            h, m = divmod(mins, 60)
+            await self.klv.jump_to_timecode(f"{h:02d}:{m:02d}:{s:02d}.{f:02d}")
+        else:
+            await self.client.locate(frame)
+        await self.async_request_refresh()
+
+    async def async_skip_to_event(self, event_id: str | None = None, index: int | None = None) -> None:
+        if self.klv is None:
+            raise DCPCommandError("KLV API not enabled")
+        if event_id is None:
+            items = self.data.spl_items if self.data else []
+            if index is None or not 0 <= index < len(items):
+                raise DCPCommandError("unknown SPL event")
+            event_id = items[index]["event_id"]
+        await self.klv.skip_to_event(event_id)
+        await self.async_request_refresh()
+
+    async def async_eject(self) -> None:
+        if self.spl_loaded:
+            await self.klv.simple("EjectSPL")
+        else:
+            await self.client.eject()
+        self._start_requested = None
+        await self.async_request_refresh()
+
+    def library(self) -> dict:
+        """CPLs and SPLs for the load dialog."""
+        cpls = []
+        for label, raw in (self.data.clips if self.data else {}).items():
+            cached = self._cache.get(p.clip_id_to_str(raw), {})
+            fps = cached.get("fps")
+            frames = cached.get("frames")
+            cpls.append({
+                "id": p.clip_id_to_str(raw),
+                "title": cached.get("title") or self._titles.get(raw) or p.clip_id_to_str(raw),
+                "kind": cached.get("kind"),
+                "fps": fps,
+                "duration": round(frames / fps) if frames and fps and frames < 2**30 else None,
+            })
+        cpls.sort(key=lambda c: c["title"].lower())
+        spls = []
+        for label, uuid in (self.data.spls if self.data else {}).items():
+            frames = self._spl_cache.get(uuid, {}).get("frames")
+            spls.append({
+                "id": uuid,
+                "title": label,
+                "duration": round(frames / 24) if frames else None,
+            })
+        return {"cpls": cpls, "spls": spls}
+
     async def async_refresh_library(self) -> None:
         self._library_at = 0.0
         self._titles.clear()

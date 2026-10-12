@@ -175,6 +175,9 @@ class DCP2000Client:
     async def stop(self) -> None:
         await self.command(p.CMD_STOP)
 
+    async def eject(self) -> None:
+        await self.command(p.CMD_EJECT)
+
     async def step_back(self) -> None:
         await self.command(p.CMD_STEP_BACK)
 
@@ -406,7 +409,8 @@ class KLVClient:
 
     # Commands the server may answer only after its checks/ingest have finished.
     SLOW = {"PlaySPL": 90.0, "LoadSPL": 60.0, "LoadSPLbyUUID": 60.0, "StoreSPL": 60.0,
-            "SkipForward": 30.0, "SkipBackward": 30.0}
+            "SkipForward": 30.0, "SkipBackward": 30.0, "SkipToEvent": 30.0,
+            "JumpToTimeCode": 15.0}
 
     async def request(self, name: str, payload: bytes = b"") -> p.KlvMessage:
         req_id = (next(self._ids) & 0x7FFFFFFF) or 1  # must be non-zero
@@ -481,6 +485,15 @@ class KLVClient:
 
     async def loop_mode(self, mode: int | bool) -> None:
         await self.simple("LoopModeSPL", bytes([int(mode)]))
+
+    async def skip_to_event(self, event_uuid: str) -> None:
+        """Load the main element of an event of the loaded SPL (only while paused)."""
+        await self.simple("SkipToEvent", uuidlib.UUID(event_uuid).bytes)
+
+    async def jump_to_timecode(self, timecode: str) -> None:
+        """Position the current element at 'HH:MM:SS.FF' (software 0.5.4-0+)."""
+        raw = timecode.encode("ascii")[:15]
+        await self.simple("JumpToTimeCode", raw + b"\x00" * (16 - len(raw)))
 
     async def jump(self, seconds: int) -> None:
         name = "JumpForward" if seconds >= 0 else "JumpBackward"

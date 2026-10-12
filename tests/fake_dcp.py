@@ -61,6 +61,7 @@ class State:
         self.ejected = False
         self.klv_log: list[str] = []
         self.spl_state = 1  # 1 stop, 2 play, 3 pause
+        self.klv_tc: str | None = None
         self.log: list[str] = []
 
     def tick(self) -> None:
@@ -120,6 +121,10 @@ def handle_s9p(st: State, frame: bytes) -> bytes:
         return NAK
     if key == p.CMD_STOP:
         st.playing = st.still = False
+        return ACK
+    if key == p.CMD_EJECT:
+        st.playing = st.still = False
+        st.clip, st.ejected = None, True
         return ACK
     if key == p.CMD_PLAY:
         st.playing, st.still = True, False
@@ -274,6 +279,11 @@ async def serve_klv(st: State, reader, writer) -> None:
             elif name == "GetProductInfo":
                 out = (rid + b"DCP2000".ljust(16, b"\x00") + b"123456".ljust(16, b"\x00")
                        + uuid.uuid4().bytes + bytes([4, 2, 1, 0, 1, 0, 0, 7]) + ok)
+            elif name == "SkipToEvent" and st.spl_state != 3:
+                out = rid + b"\x01"  # only while paused
+            elif name == "JumpToTimeCode":
+                st.klv_tc = value[4:20].split(b"\x00", 1)[0].decode()
+                out = rid + ok
             elif name == "LoadSPLbyUUID" and value[4:20] not in (spl.bytes, spl2.bytes):
                 out = rid + b"\x01"  # failed
             else:

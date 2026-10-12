@@ -191,6 +191,18 @@
         "loop_on": "Schleife an",
         "loop_off": "Schleife aus"
       }
+    },
+    "content_kind": {
+      "options": {
+        "cpl": "CPL",
+        "spl": "Show-Playlist (SPL)"
+      }
+    },
+    "load_start": {
+      "options": {
+        "play": "Abspielen",
+        "pause": "Pause auf erstem Frame"
+      }
     }
   },
   "services": {
@@ -321,6 +333,60 @@
     "measure_frame_rate": {
       "name": "Bildrate messen",
       "description": "Ermittelt die Bildrate des geladenen Clips (kurzer Sprung und zurück, nur in Pause). Das Ergebnis wird je Clip gespeichert."
+    },
+    "load_content": {
+      "name": "Inhalt laden",
+      "description": "Lädt ein CPL oder eine Show-Playlist. Start „play“ spielt ab, „pause“ parkt auf dem ersten Frame. Eine SPL mit Automation-Cues führt diese beim Abspielen aus.",
+      "fields": {
+        "kind": {
+          "name": "Typ",
+          "description": "cpl oder spl."
+        },
+        "id": {
+          "name": "Inhalt",
+          "description": "Clip-ID, CPL-Titel, SPL-Titel oder UUID."
+        },
+        "start": {
+          "name": "Start",
+          "description": "play oder pause."
+        }
+      }
+    },
+    "seek": {
+      "name": "Springen",
+      "description": "Springt im aktuellen Clip / SPL-Element (SPL: JumpToTimeCode).",
+      "fields": {
+        "timecode": {
+          "name": "Timecode",
+          "description": "HH:MM:SS:FF"
+        },
+        "position": {
+          "name": "Position",
+          "description": "Sekunden ab Clip-Anfang."
+        }
+      }
+    },
+    "skip_to_event": {
+      "name": "Zu SPL-Event springen",
+      "description": "Springt zu einem Event der geladenen SPL. Nur in Pause.",
+      "fields": {
+        "event_id": {
+          "name": "Event-ID",
+          "description": "UUID des Events."
+        },
+        "index": {
+          "name": "Index",
+          "description": "Position in der Event-Liste (0 = erstes)."
+        }
+      }
+    },
+    "eject": {
+      "name": "Auswerfen",
+      "description": "Wirft die geladene SPL aus, oder den Clip, wenn keine SPL geladen ist."
+    },
+    "get_library": {
+      "name": "Bibliothek",
+      "description": "Liefert alle CPLs und SPLs mit Titeln für Auswahldialoge."
     }
   }
 }

@@ -64,6 +64,29 @@ erkannt; doppelte Einrichtung wird abgelehnt. IP-Wechsel: **⋮ → Neu konfigur
 - **Schalter** – GPO 1–8 (Option). Der Server meldet Ausgänge nicht zurück,
   daher „angenommener Zustand“, der letzte Wert wird nach Neustart wiederhergestellt.
 
+## Dashboard-Karte
+
+Die Integration bringt eine eigene Karte mit und lädt sie automatisch in jedes
+Dashboard; eine Ressource muss nicht eingetragen werden.
+
+```yaml
+type: custom:doremi-dcp2000-card
+entity: media_player.kino_1
+# show_playlist: false   # Event-Liste rechts ausblenden
+```
+
+- Oben der aktuelle Clip (bzw. das aktuelle SPL-Element), darunter die ganze
+  SPL: links Timecode / Länge, rechts Restzeit, Balken mit Prozent.
+- Rechts die Events der geladenen SPL mit Automation-Cues; das laufende ist markiert.
+- Knöpfe: vorheriger Clip, Play/Pause, Auswerfen, nächster Clip.
+- **Auswerfen:** bei Wiedergabe mit Sicherheitsabfrage; bei Pause sofort;
+  sonst öffnet sich der Ladedialog (Reiter CPL / SPL, Suche). Bei einer SPL
+  werden vor dem Laden ihre Automation-Cues angezeigt. „Abspielen“ startet
+  sofort, „Pause“ lädt und bleibt auf dem ersten Frame stehen.
+- **Nur in Pause:** Klick auf ein Event springt dorthin (`SkipToEvent`),
+  der Clip-Balken lässt sich mit der Maus ziehen, ein Klick auf den Timecode
+  öffnet eine Eingabe (HH:MM:SS:FF).
+
 ## Aktionen (Dienste)
 
 Alle Aktionen zielen auf den Media Player des jeweiligen Servers:
@@ -98,6 +121,10 @@ action: doremi_dcp2000.list_content
 target: {entity_id: media_player.kino_1}
 response_variable: inhalte
 ```
+
+Für die Karte und Automationen: `load_content` (CPL/SPL laden, `start: play|pause`),
+`seek` (Timecode oder Sekunden; bei SPL per `JumpToTimeCode`), `skip_to_event`,
+`eject`, `get_library` (alle CPLs/SPLs mit Titeln).
 
 Weitere: `set_frame`, `step_back`, `set_gpo` (ganzes Byte), sowie mit KLV
 `spl_load` (gespeicherte SPL per Name/UUID laden, oder XML laden/speichern), `spl_command`

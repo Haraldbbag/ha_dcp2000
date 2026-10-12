@@ -119,6 +119,10 @@ async def _steps(st):
         assert [i["kind"] for i in items] == ["pattern", "composition"]
         assert items[1]["start"] == 2.0 and items[1]["duration"] == 144.0
         assert items[1]["cues"] == ["Licht_aus"] and p.format_hms(3725) == "01:02:05"
+        await k.simple("PauseSPL")
+        await k.skip_to_event("00000000-0000-0000-0000-0000000000e2")
+        await k.jump_to_timecode("00:01:30.12")
+        assert st.klv_tc == "00:01:30.12"
         await k.jump(-180)
         await k.loop_mode(1)
         try:

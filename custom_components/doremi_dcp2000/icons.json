@@ -128,6 +128,21 @@
     },
     "measure_frame_rate": {
       "service": "mdi:speedometer"
+    },
+    "load_content": {
+      "service": "mdi:eject-circle-outline"
+    },
+    "seek": {
+      "service": "mdi:timer-marker-outline"
+    },
+    "skip_to_event": {
+      "service": "mdi:playlist-play"
+    },
+    "eject": {
+      "service": "mdi:eject"
+    },
+    "get_library": {
+      "service": "mdi:filmstrip-box-multiple"
     }
   }
 }
