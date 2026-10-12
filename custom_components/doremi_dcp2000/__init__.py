@@ -38,21 +38,25 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     path = Path(__file__).parent / "frontend" / "doremi-dcp2000-card.js"
     await hass.http.async_register_static_paths([StaticPathConfig(CARD_URL, str(path), False)])
     url = f"{CARD_URL}?v={version}"
-    add_extra_js_url(hass, url)
-    # Also as a dashboard resource: loaded by every dashboard on open, independent
-    # of a cached start page (seen with Firefox).
+    # Load the card as a dashboard resource, i.e. after the frontend has booted.
+    # Loading it earlier via the start page (add_extra_js_url) breaks in Firefox:
+    # the scoped-custom-element-registry polyfill installed during boot forgets
+    # elements defined before it ("Custom element doesn't exist").
     try:
-        await _async_register_resource(hass, url)
+        registered = await _async_register_resource(hass, url)
     except Exception as err:  # noqa: BLE001 - never block setup over the card
         _LOGGER.warning("Could not register the dashboard card as resource: %s", err)
+        registered = False
+    if not registered:  # YAML resources: fall back to the start page
+        add_extra_js_url(hass, url)
     return True
 
 
-async def _async_register_resource(hass: HomeAssistant, url: str) -> None:
+async def _async_register_resource(hass: HomeAssistant, url: str) -> bool:
     data = hass.data.get("lovelace")
     resources = getattr(data, "resources", None)
     if resources is None or getattr(data, "resource_mode", "storage") != "storage":
-        return  # YAML resources: the user manages them
+        return False  # YAML resources: the user manages them
     if not getattr(resources, "loaded", True):
         await resources.async_load()
         resources.loaded = True
@@ -61,8 +65,9 @@ async def _async_register_resource(hass: HomeAssistant, url: str) -> None:
         if item.get("url", "").split("?", 1)[0] == base:
             if item["url"] != url:
                 await resources.async_update_item(item["id"], {"res_type": "module", "url": url})
-            return
+            return True
     await resources.async_create_item({"res_type": "module", "url": url})
+    return True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: DCPConfigEntry) -> bool:
