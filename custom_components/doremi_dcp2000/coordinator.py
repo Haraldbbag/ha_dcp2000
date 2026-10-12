@@ -626,12 +626,29 @@ class DCPCoordinator(DataUpdateCoordinator[DCPData]):
         position = p.timecode_to_frames(tc, fps) / fps if tc else 0.0
         if self.spl_loaded:
             if position > threshold:
+                # JumpToTimeCode is acknowledged but ignored while the show
+                # plays: pause, jump, play again.
+                playing = (await self.klv.status_spl()).state == "playing"
+                if playing:
+                    await self.klv.simple("PauseSPL")
+                    await self._wait_spl_state("paused")
                 await self.klv.jump_to_timecode("00:00:00.00")
+                if playing:
+                    await self.klv.simple("PlaySPL")
             else:
                 await self.klv.simple("SkipBackward")
         else:
             await self.client.locate(0)
         self.start_burst()
+
+    async def _wait_spl_state(self, state: str, timeout: float = 4.0) -> bool:
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout
+        while loop.time() < deadline:
+            if (await self.klv.status_spl()).state == state:
+                return True
+            await asyncio.sleep(0.2)
+        return False
 
     async def async_pause(self) -> None:
         if self.spl_loaded:
