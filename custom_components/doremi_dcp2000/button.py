@@ -23,6 +23,11 @@ class DCPButtonDescription(ButtonEntityDescription):
     klv_only: bool = False
 
 
+async def _spl_play(c: DCPCoordinator) -> None:
+    c.mark_start_requested()
+    await c.klv.simple("PlaySPL")
+
+
 BUTTONS: tuple[DCPButtonDescription, ...] = (
     DCPButtonDescription(
         key="shutter_open", translation_key="shutter_open",
@@ -56,7 +61,7 @@ BUTTONS: tuple[DCPButtonDescription, ...] = (
     ),
     DCPButtonDescription(
         key="spl_play", translation_key="spl_play", klv_only=True,
-        press_fn=lambda c: c.klv.simple("PlaySPL"),
+        press_fn=lambda c: _spl_play(c),
     ),
     DCPButtonDescription(
         key="spl_pause", translation_key="spl_pause", klv_only=True,

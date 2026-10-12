@@ -52,6 +52,9 @@ class DCPData:
     @property
     def state(self) -> str:
         state = self.status.state
+        if state == "ejected" and self.spl and self.spl.spl_uuid:
+            # An SPL is loaded but not started: the 9-pin side shows "eject".
+            state = {"playing": "playing", "paused": "paused"}.get(self.spl.state, "cued")
         if self.starting and state != "playing":
             return "starting"
         return state
@@ -190,7 +193,7 @@ class DCPCoordinator(DataUpdateCoordinator[DCPData]):
                 _LOGGER.debug("GPI sense failed: %s", err)
                 data.gpi = None
 
-        if self.klv:
+        if self.klv and not self.klv.busy:  # don't queue behind a slow PlaySPL
             try:
                 data.spl = await self.klv.status_spl()
                 self._klv_warned = False
@@ -284,6 +287,17 @@ class DCPCoordinator(DataUpdateCoordinator[DCPData]):
             label = title if titles.count(title) == 1 else f"{title} ({uuid[:8]})"
             labels[label] = uuid
         data.spls = dict(sorted(labels.items(), key=lambda kv: kv[0].lower()))
+
+    def remember_spl_xml(self, xml: str) -> str | None:
+        """Keep the title of an SPL loaded from XML (it is not in the SPL list)."""
+        import re
+
+        uid = re.search(r"<Id>\s*(?:urn:uuid:)?([0-9a-fA-F-]{36})\s*</Id>", xml)
+        title = re.search(r"<ShowTitleText[^>]*>([^<]*)</ShowTitleText>", xml)
+        if uid and title:
+            self._spl_cache.setdefault(uid.group(1).lower(), {})["title"] = title.group(1).strip()
+            return uid.group(1).lower()
+        return None
 
     def spl_by_name(self, name: str) -> str:
         """Accept an SPL label, title or UUID."""

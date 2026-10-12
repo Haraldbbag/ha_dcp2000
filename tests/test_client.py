@@ -110,7 +110,8 @@ async def _steps(st):
         assert spl.cpl_uuid is not None
         assert (await k.get_spl_list())[0] == spl.spl_uuid
         assert (await k.get_spl_info(spl.spl_uuid))["title"] == "Abendvorstellung"
-        await k.simple("PlaySPL")
+        await k.simple("PlaySPL")  # answered after 4 s > default timeout 3 s
+        assert st.klv_log.count("PlaySPL") == 1  # sent exactly once
         assert (await k.retrieve_spl(spl.spl_uuid)).startswith("<ShowPlaylist>")
         await k.jump(-180)
         await k.loop_mode(1)

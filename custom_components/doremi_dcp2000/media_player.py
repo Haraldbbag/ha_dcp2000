@@ -322,6 +322,7 @@ class DCPMediaPlayer(DCPEntity, MediaPlayerEntity):
         if spl_uuid:  # UUID, title or select-list label
             await self._run(klv.load_spl_uuid(self.coordinator.spl_by_name(spl_uuid)))
         elif xml:
+            self.coordinator.remember_spl_xml(xml)
             await self._run(klv.store_spl(xml) if store else klv.load_spl(xml))
         else:
             raise ServiceValidationError("Provide either xml or spl_uuid.")
@@ -340,9 +341,9 @@ class DCPMediaPlayer(DCPEntity, MediaPlayerEntity):
         await self._run(actions[command]())
 
     async def _spl_play(self, klv):
-        result = await klv.simple("PlaySPL")
+        # The server answers PlaySPL only after its pre-show checks (up to ~30 s).
         self.coordinator.mark_start_requested()
-        return result
+        return await klv.simple("PlaySPL")
 
     async def async_spl_jump(self, seconds: int) -> None:
         await self._run(self._require_klv().jump(seconds))

@@ -136,6 +136,13 @@ actions:
   z. B. fehlender/abgelaufener KDM), meldet die Aktion einen Fehler und der
   Transport zeigt „Ausgeworfen“.
 
+**Show-Playlists:** SPLs können Automation-Cues enthalten (z. B. Licht,
+Projektorlampe, Format). Diese werden beim Abspielen ausgeführt – auch wenn
+über Home Assistant gestartet. Mit `spl_retrieve` lässt sich das XML vorher
+prüfen. Der erste Start einer SPL wird erst nach den Sicherheitsprüfungen des
+Servers bestätigt; die Integration wartet darauf bis zu 90 s und zeigt solange
+„Startet …“. Befehle werden nach einem Timeout nie automatisch wiederholt.
+
 ## Protokoll-Hinweise
 
 Grundlage sind die Doremi-Dokumente *DCP-2000 API Description* v1.0/v1.5 und

@@ -32,6 +32,7 @@ FPS = {b"TRAILER2": 25}  # everything else 24
 NO_KDM = {b"KDMLESS\x00"}
 # Real DCP-2000 firmware answers 60.A2 (current frame) with 0; mimic that.
 BROKEN_CURRENT_FRAME = True
+PLAY_DELAY = 4.0  # seconds before PlaySPL is answered
 
 
 class State:
@@ -45,6 +46,7 @@ class State:
         self.gpi = 0b00000101
         self.list_pos = 0
         self.ejected = False
+        self.klv_log: list[str] = []
         self.log: list[str] = []
 
     def tick(self) -> None:
@@ -213,6 +215,9 @@ async def serve_klv(st: State, reader, writer) -> None:
             if name is None:
                 break
             ok = b"\x00"
+            st.klv_log.append(name)
+            if name == "PlaySPL":
+                await asyncio.sleep(PLAY_DELAY)  # real server: pre-show checks first
             if name == "GetCPLList":
                 out = rid + batch([c[1].bytes for c in CLIPS.values()]) + ok
             elif name == "GetSPLList":

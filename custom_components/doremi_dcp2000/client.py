@@ -63,7 +63,14 @@ class _Connection:
             except OSError:
                 pass
 
-    async def _exchange(self, data: bytes, read) -> object:
+    async def _exchange(self, data: bytes, read, timeout: float | None = None) -> object:
+        """Send and read one answer.
+
+        A dropped/stale connection is retried once (the request never reached
+        the server). A timeout is *not* retried: the server may still be
+        executing the command (e.g. PlaySPL runs its pre-show checks before it
+        answers), and sending it again would duplicate it.
+        """
         async with self._lock:
             for attempt in (1, 2):
                 await self._connect()
@@ -73,14 +80,18 @@ class _Connection:
                     await self._writer.drain()
                     if read is None:
                         return None
-                    return await asyncio.wait_for(read(self._reader), self.timeout)
-                except (OSError, asyncio.TimeoutError, asyncio.IncompleteReadError) as err:
+                    return await asyncio.wait_for(read(self._reader), timeout or self.timeout)
+                except asyncio.TimeoutError as err:
+                    await self.close()
+                    raise DCPConnectionError(
+                        f"{self.host}:{self.port}: no answer within {timeout or self.timeout:.0f} s"
+                    ) from err
+                except (OSError, asyncio.IncompleteReadError) as err:
                     await self.close()
                     if attempt == 2:
-                        reason = str(err) or ("no answer" if isinstance(err, asyncio.TimeoutError)
-                                              else type(err).__name__)
+                        reason = str(err) or type(err).__name__
                         raise DCPConnectionError(f"{self.host}:{self.port}: {reason}") from err
-                    _LOGGER.debug("Retrying after error: %r", err)
+                    _LOGGER.debug("Reconnecting after error: %r", err)
         raise DCPConnectionError("unreachable")
 
 
@@ -374,6 +385,11 @@ class KLVClient:
     async def close(self) -> None:
         await self._conn.close()
 
+    @property
+    def busy(self) -> bool:
+        """A (possibly slow) request is in flight on the KLV connection."""
+        return self._conn._lock.locked()
+
     @staticmethod
     async def _read_klv(reader: asyncio.StreamReader) -> p.KlvMessage:
         key = await reader.readexactly(16)
@@ -388,6 +404,10 @@ class KLVClient:
         value = await reader.readexactly(length)
         return p.KlvMessage(key[13], key[14], key[15], value)
 
+    # Commands the server may answer only after its checks/ingest have finished.
+    SLOW = {"PlaySPL": 90.0, "LoadSPL": 60.0, "LoadSPLbyUUID": 60.0, "StoreSPL": 60.0,
+            "SkipForward": 30.0, "SkipBackward": 30.0}
+
     async def request(self, name: str, payload: bytes = b"") -> p.KlvMessage:
         req_id = (next(self._ids) & 0x7FFFFFFF) or 1  # must be non-zero
         b14, b15, b16 = p.KLV_MESSAGES[name]
@@ -399,7 +419,9 @@ class KLVClient:
                     return msg
                 _LOGGER.debug("Skipping KLV %02X.%02X", msg.b14, msg.b15)
 
-        msg = await self._conn._exchange(p.klv_request(name, req_id, payload, self.reg), read)
+        msg = await self._conn._exchange(
+            p.klv_request(name, req_id, payload, self.reg), read, self.SLOW.get(name)
+        )
         if msg.response:
             raise DCPCommandError(
                 f"{name}: {p.RESPONSE_CODES.get(msg.response, msg.response)}"
@@ -439,7 +461,7 @@ class KLVClient:
 
     async def retrieve_spl(self, spl_uuid: str) -> str:
         value = (await self.request("RetrSPL", uuidlib.UUID(spl_uuid).bytes)).value
-        return value[4:-1].decode("utf-8", errors="replace")
+        return value[4:-1].rstrip(b"\x00").decode("utf-8", errors="replace")
 
     async def simple(self, name: str, payload: bytes = b"") -> None:
         await self.request(name, payload)
