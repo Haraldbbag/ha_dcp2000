@@ -46,6 +46,8 @@ class DCPData:
     spl: p.SplStatus | None = None
     clips: dict[str, bytes] = field(default_factory=dict)
     spls: dict[str, str] = field(default_factory=dict)  # label -> SPL UUID
+    spl_items: list[dict] = field(default_factory=list)  # events of the loaded SPL
+    spl_index: int | None = None  # index of the current event in spl_items
     position_updated_at: datetime | None = None
     starting: bool = False
 
@@ -117,6 +119,8 @@ class DCPCoordinator(DataUpdateCoordinator[DCPData]):
         self.default_fps: float = float(entry.options.get(CONF_FPS, DEFAULT_FPS))
         self._start_requested: float | None = None
         self._spl_autoplay_until: float | None = None
+        self._spl_items_uuid: str | None = None
+        self._spl_xml: dict[str, str] = {}
         self.gpo_state: int = 0  # the device cannot report outputs; we remember them
         self._library_at = 0.0
         self._ext_supported = True
@@ -200,6 +204,7 @@ class DCPCoordinator(DataUpdateCoordinator[DCPData]):
             try:
                 data.spl = await self.klv.status_spl()
                 self._check_spl_autoplay(data)
+                await self._update_spl_items(data)
                 self._klv_warned = False
             except DCPError as err:
                 data.spl = None
@@ -298,9 +303,14 @@ class DCPCoordinator(DataUpdateCoordinator[DCPData]):
 
         uid = re.search(r"<Id>\s*(?:urn:uuid:)?([0-9a-fA-F-]{36})\s*</Id>", xml)
         title = re.search(r"<ShowTitleText[^>]*>([^<]*)</ShowTitleText>", xml)
-        if uid and title:
-            self._spl_cache.setdefault(uid.group(1).lower(), {})["title"] = title.group(1).strip()
-            return uid.group(1).lower()
+        if uid:
+            key = uid.group(1).lower()
+            self._spl_xml[key] = xml
+            if key == self._spl_items_uuid:
+                self._spl_items_uuid = None  # reload the event list
+            if title:
+                self._spl_cache.setdefault(key, {})["title"] = title.group(1).strip()
+            return key
         return None
 
     def spl_by_name(self, name: str) -> str:
@@ -422,6 +432,48 @@ class DCPCoordinator(DataUpdateCoordinator[DCPData]):
         if before.state != "paused":
             self._spl_autoplay_until = time.monotonic() + START_TIMEOUT
         await self.async_request_refresh()
+
+    async def _update_spl_items(self, data: DCPData) -> None:
+        """Keep the event list of the loaded SPL and the current position in it."""
+        uuid = data.spl.spl_uuid if data.spl else None
+        if uuid != self._spl_items_uuid:
+            self._spl_items_uuid = uuid
+            data.spl_items = await self._load_spl_items(uuid) if uuid else []
+        if not data.spl_items or not data.spl:
+            data.spl_index = None
+            return
+        spl = data.spl
+        for key, value in (("event_id", spl.event_id), ("element_id", spl.element_id)):
+            if value:
+                for i, item in enumerate(data.spl_items):
+                    if item[key] == value:
+                        data.spl_index = i
+                        return
+        pos = spl.position
+        data.spl_index = next(
+            (i for i, it in enumerate(data.spl_items) if it["start"] <= pos < it["start"] + it["duration"]),
+            None,
+        )
+
+    async def _load_spl_items(self, uuid: str) -> list[dict]:
+        xml = self._spl_xml.get(uuid)
+        if xml is None:
+            try:
+                xml = await self.klv.retrieve_spl(uuid)
+            except DCPError as err:
+                _LOGGER.debug("RetrSPL %s failed: %s", uuid, err)
+                return []
+        try:
+            items = p.parse_spl_xml(xml)
+        except Exception as err:  # noqa: BLE001 - malformed XML from the server
+            _LOGGER.warning("Cannot parse SPL %s: %s", uuid, err)
+            return []
+        for item in items:  # prefer the CPL titles we know
+            cpl = item.get("cpl_uuid")
+            if cpl:
+                cached = self._cache.get(cpl.replace("-", "")[:8], {})
+                item["title"] = cached.get("title") or item["title"]
+        return items
 
     def _check_spl_autoplay(self, data: DCPData) -> None:
         if self._spl_autoplay_until is None or data.spl is None:

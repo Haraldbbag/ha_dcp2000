@@ -12,10 +12,11 @@ from homeassistant.components.sensor import (
     SensorEntityDescription,
     SensorStateClass,
 )
-from homeassistant.const import PERCENTAGE, EntityCategory, UnitOfTime
+from homeassistant.const import PERCENTAGE, EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
+from . import protocol as p
 from .coordinator import DCPConfigEntry, DCPCoordinator, DCPData
 from .entity import DCPEntity
 
@@ -30,10 +31,42 @@ class DCPSensorDescription(SensorEntityDescription):
     gpio_only: bool = False
 
 
-def _remaining(d: DCPData) -> float | None:
+def _remaining_s(d: DCPData) -> int | None:
     if d.frame is None or not d.last_frame:
         return None
     return round(max(0, d.last_frame - d.frame) / d.fps)
+
+
+def _spl_remaining_s(d: DCPData) -> int | None:
+    return d.spl.remaining if d.spl and d.spl.spl_uuid else None
+
+
+def _spl_item(d: DCPData) -> dict | None:
+    if d.spl_index is None or not d.spl_items:
+        return None
+    return d.spl_items[d.spl_index]
+
+
+def _spl_content_attrs(d: DCPData) -> dict[str, Any]:
+    items = [
+        {
+            "title": it["title"],
+            "kind": it["kind"],
+            "start": p.format_hms(it["start"]),
+            "duration": p.format_hms(it["duration"]),
+            "fps": it["fps"],
+            "cues": it["cues"],
+            "current": i == d.spl_index,
+        }
+        for i, it in enumerate(d.spl_items)
+    ]
+    return {
+        "spl_uuid": d.spl.spl_uuid if d.spl else None,
+        "current_index": d.spl_index,
+        "count": len(items),
+        "remaining": p.format_hms(_spl_remaining_s(d)),
+        "items": items,
+    }
 
 
 SENSORS: tuple[DCPSensorDescription, ...] = (
@@ -53,8 +86,19 @@ SENSORS: tuple[DCPSensorDescription, ...] = (
         state_class=SensorStateClass.MEASUREMENT, value_fn=lambda d: d.progress,
     ),
     DCPSensorDescription(
-        key="remaining", translation_key="remaining", device_class=SensorDeviceClass.DURATION,
-        native_unit_of_measurement=UnitOfTime.SECONDS, value_fn=_remaining,
+        key="remaining", translation_key="remaining",
+        value_fn=lambda d: p.format_hms(_remaining_s(d)),
+        attr_fn=lambda d: {"seconds": _remaining_s(d)},
+    ),
+    DCPSensorDescription(
+        key="spl_remaining", translation_key="spl_remaining", klv_only=True,
+        value_fn=lambda d: p.format_hms(_spl_remaining_s(d)),
+        attr_fn=lambda d: {"seconds": _spl_remaining_s(d)},
+    ),
+    DCPSensorDescription(
+        key="spl_content", translation_key="spl_content", klv_only=True,
+        value_fn=lambda d: (_spl_item(d) or {}).get("title"),
+        attr_fn=_spl_content_attrs,
     ),
     DCPSensorDescription(
         key="frame_rate", translation_key="frame_rate", native_unit_of_measurement="fps",

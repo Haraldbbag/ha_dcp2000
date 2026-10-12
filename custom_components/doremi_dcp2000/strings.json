@@ -78,7 +78,12 @@
         "name": "Progress"
       },
       "remaining": {
-        "name": "Remaining"
+        "name": "Clip remaining",
+        "state_attributes": {
+          "seconds": {
+            "name": "Seconds"
+          }
+        }
       },
       "frame": {
         "name": "Frame"
@@ -111,6 +116,17 @@
             "name": "Source"
           }
         }
+      },
+      "spl_remaining": {
+        "name": "SPL remaining",
+        "state_attributes": {
+          "seconds": {
+            "name": "Seconds"
+          }
+        }
+      },
+      "spl_content": {
+        "name": "SPL current event"
       }
     },
     "binary_sensor": {

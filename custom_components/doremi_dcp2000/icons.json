@@ -62,6 +62,15 @@
       },
       "frame_rate": {
         "default": "mdi:speedometer"
+      },
+      "remaining": {
+        "default": "mdi:timer-sand"
+      },
+      "spl_remaining": {
+        "default": "mdi:timer-sand"
+      },
+      "spl_content": {
+        "default": "mdi:format-list-numbered"
       }
     },
     "binary_sensor": {

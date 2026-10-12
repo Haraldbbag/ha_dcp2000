@@ -48,8 +48,12 @@ erkannt; doppelte Einrichtung wird abgelehnt. IP-Wechsel: **⋮ → Neu konfigur
   alle Clips auf dem Server (Quelle wählen = Clip laden). Mit KLV zusätzlich
   „Nächster/Vorheriger Titel“ = nächstes/vorheriges CPL der SPL.
 - **Sensoren** – Transport (Wiedergabe/Pause/Geladen/Gestoppt), Titel, Clip-ID,
-  CPL-UUID, Timecode, Fortschritt %, Restzeit, Anzahl Clips; mit KLV:
-  SPL-Status, SPL-Fortschritt, SPL-UUID.
+  CPL-UUID, Timecode, Fortschritt %, **Restzeit Clip** (hh:mm:ss, Attribut
+  `seconds`), Anzahl Clips; mit KLV: SPL-Status, SPL-Fortschritt, SPL-UUID,
+  **Restzeit SPL** (hh:mm:ss) und **SPL aktuelles Event** – Zustand ist der Titel
+  des laufenden Events, das Attribut `items` enthält die komplette Event-Liste
+  der geladenen SPL (Titel, Typ, Start, Dauer, Bildrate, Automation-Cues,
+  `current`) für Dashboards.
 - **Buttons** – Dowser öffnen/schließen, Projektor an/aus (generische
   Projektorbefehle `43.C8.80…` über den Server), Frame zurück, Bibliothek
   aktualisieren; mit KLV: SPL abspielen/pausieren/auswerfen.

@@ -32,6 +32,18 @@ FPS = {b"TRAILER2": 25}  # everything else 24
 NO_KDM = {b"KDMLESS\x00"}
 # Real DCP-2000 firmware answers 60.A2 (current frame) with 0; mimic that.
 BROKEN_CURRENT_FRAME = True
+SPL_XML = """<ShowPlaylist><Id>urn:uuid:SPLID</Id><ShowTitleText>Abendvorstellung</ShowTitleText>
+<PackList><Pack><EventList>
+<Event><Id>urn:uuid:00000000-0000-0000-0000-0000000000e1</Id><ElementList><MainElement>
+<Pattern><Id>urn:uuid:00000000-0000-0000-0000-0000000000a1</Id><AnnotationText>Black</AnnotationText>
+<Duration>48</Duration><EditRate>24 1</EditRate></Pattern></MainElement></ElementList></Event>
+<Event><Id>urn:uuid:00000000-0000-0000-0000-0000000000e2</Id><ElementList><MainElement>
+<Composition><Id>urn:uuid:00000000-0000-0000-0000-0000000000a2</Id>
+<CompositionPlaylistId>urn:uuid:aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee</CompositionPlaylistId>
+<AnnotationText>TRAILER2_OV</AnnotationText><IntrinsicDuration>3600</IntrinsicDuration><EditRate>25 1</EditRate>
+</Composition></MainElement><AutomationCue><Id>urn:uuid:00000000-0000-0000-0000-0000000000c1</Id>
+<Action>Licht_aus</Action><Offset Kind="Start">0</Offset></AutomationCue></ElementList></Event>
+</EventList></Pack></PackList></ShowPlaylist>"""
 PLAY_DELAY = 4.0  # seconds before PlaySPL is answered
 CHECK_DELAY = 1.0  # pre-show checks after the first PlaySPL
 
@@ -251,10 +263,12 @@ async def serve_klv(st: State, reader, writer) -> None:
             elif name == "StatusSPL":
                 cpl = CLIPS[st.clip][1].bytes if st.clip else b"\x00" * 16
                 out = (rid + bytes([st.spl_state]) + spl.bytes
-                       + struct.pack(">II", 2268, 5400) + cpl + b"\x00" * 32
+                       + struct.pack(">II", 30, 146) + cpl
+                       + uuid.UUID("00000000-0000-0000-0000-0000000000e2").bytes
+                       + uuid.UUID("00000000-0000-0000-0000-0000000000a2").bytes
                        + struct.pack(">II", 10, 100) + ok)
             elif name == "RetrSPL":
-                out = rid + b"<ShowPlaylist><Id>urn:uuid:" + str(spl).encode() + b"</Id></ShowPlaylist>" + ok
+                out = rid + SPL_XML.replace("SPLID", str(spl)).encode() + b"\x00" + ok
             elif name == "GetAPIProtocolVersion":
                 out = rid + bytes([2, 5, 0]) + ok
             elif name == "GetProductInfo":

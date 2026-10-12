@@ -505,6 +505,12 @@ class SplStatus:
     cpl_uuid: str | None
     element_position: int
     element_duration: int
+    event_id: str | None = None
+    element_id: str | None = None
+
+    @property
+    def remaining(self) -> int | None:
+        return max(0, self.duration - self.position) if self.duration else None
 
     @property
     def spl_percent(self) -> int | None:
@@ -521,10 +527,93 @@ def parse_status_spl(value: bytes) -> SplStatus:
     spl = _uuid_or_none(v[1:17])
     position, duration = struct.unpack_from(">II", v, 17)
     cpl = _uuid_or_none(v[25:41])
-    # v[41:57] event id, v[57:73] element id
+    event = _uuid_or_none(v[41:57]) if len(v) >= 57 else None
+    element = _uuid_or_none(v[57:73]) if len(v) >= 73 else None
     el_pos, el_dur = struct.unpack_from(">II", v, 73) if len(v) >= 81 else (0, 0)
     return SplStatus(PLAYBACK_STATES.get(state, f"0x{state:02X}"), spl, position, duration,
-                     cpl, el_pos, el_dur)
+                     cpl, el_pos, el_dur, event, element)
+
+
+def format_hms(seconds: float | None) -> str | None:
+    if seconds is None:
+        return None
+    seconds = max(0, int(round(seconds)))
+    return f"{seconds // 3600:02d}:{seconds % 3600 // 60:02d}:{seconds % 60:02d}"
+
+
+def _local(tag: str) -> str:
+    return tag.rsplit("}", 1)[-1]
+
+
+def _child(el, name: str):
+    for c in el:
+        if _local(c.tag) == name:
+            return c
+    return None
+
+
+def _text(el, name: str) -> str | None:
+    c = _child(el, name) if el is not None else None
+    return c.text.strip() if c is not None and c.text else None
+
+
+def _uuid_text(value: str | None) -> str | None:
+    if not value:
+        return None
+    value = value.strip()
+    return value[9:].lower() if value.lower().startswith("urn:uuid:") else value.lower()
+
+
+def parse_spl_xml(xml: str) -> list[dict]:
+    """Events of a (Doremi or SMPTE draft) Show Playlist in play order."""
+    import xml.etree.ElementTree as ET
+
+    root = ET.fromstring(xml.strip().rstrip("\x00").encode("utf-8"))
+    items: list[dict] = []
+    start = 0.0
+    for event in root.iter():
+        if _local(event.tag) != "Event":
+            continue
+        elements = _child(event, "ElementList")
+        if elements is None:
+            continue
+        main = None
+        holder = _child(elements, "MainElement")
+        for c in (holder if holder is not None else elements):
+            if _local(c.tag) in ("Composition", "Pattern"):
+                main = c
+                break
+        if main is None:
+            continue
+        kind = _local(main.tag).lower()
+        rate = (_text(main, "EditRate") or "24 1").split()
+        try:
+            fps = int(rate[0]) / int(rate[1] if len(rate) > 1 else 1)
+        except (ValueError, ZeroDivisionError):
+            fps = 24.0
+        frames = _text(main, "IntrinsicDuration") or _text(main, "Duration") or "0"
+        try:
+            duration = int(frames) / fps
+        except ValueError:
+            duration = 0.0
+        cues = [
+            _text(c, "Action")
+            for c in elements
+            if _local(c.tag) == "AutomationCue" and _text(c, "Action")
+        ]
+        items.append({
+            "event_id": _uuid_text(_text(event, "Id")),
+            "element_id": _uuid_text(_text(main, "Id")),
+            "kind": kind,
+            "cpl_uuid": _uuid_text(_text(main, "CompositionPlaylistId")),
+            "title": _text(main, "AnnotationText") or kind,
+            "fps": round(fps, 3),
+            "start": round(start, 2),
+            "duration": round(duration, 2),
+            "cues": cues,
+        })
+        start += duration
+    return items
 
 
 @dataclass(slots=True)

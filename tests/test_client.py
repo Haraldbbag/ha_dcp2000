@@ -106,13 +106,19 @@ async def _steps(st):
         assert info.title == "Trailer Herbst" and info.fps == 25 and info.kind == "feature"
         assert info.width == 2048 and info.channels == 6 and not info.encrypted
         spl = await k.status_spl()
-        assert spl.spl_uuid.startswith("99999999") and spl.spl_percent == 42
+        assert spl.spl_uuid.startswith("99999999") and spl.spl_percent == 21
+        assert spl.remaining == 116 and spl.event_id.endswith("e2")
         assert spl.cpl_uuid is not None
         assert (await k.get_spl_list())[0] == spl.spl_uuid
         assert (await k.get_spl_info(spl.spl_uuid))["title"] == "Abendvorstellung"
         await k.simple("PlaySPL")  # answered after 4 s > default timeout 3 s
         assert st.klv_log.count("PlaySPL") == 1  # sent exactly once
-        assert (await k.retrieve_spl(spl.spl_uuid)).startswith("<ShowPlaylist>")
+        xml = await k.retrieve_spl(spl.spl_uuid)
+        assert xml.startswith("<ShowPlaylist>") and xml.endswith("</ShowPlaylist>")
+        items = p.parse_spl_xml(xml)
+        assert [i["kind"] for i in items] == ["pattern", "composition"]
+        assert items[1]["start"] == 2.0 and items[1]["duration"] == 144.0
+        assert items[1]["cues"] == ["Licht_aus"] and p.format_hms(3725) == "01:02:05"
         await k.jump(-180)
         await k.loop_mode(1)
         try:
