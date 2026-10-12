@@ -119,9 +119,13 @@ actions:
   Das passiert automatisch nach jedem Laden über HA (`cue_clip`, Quelle
   wählen) und per Button **Bildrate messen**. Clips, die anders geladen wurden,
   starten mit der Standard-Bildrate und werden korrigiert, sobald der Timecode
-  einen höheren Frame-Wert zeigt. Ergebnisse und Titel werden je Clip
-  gespeichert (überleben Neustarts); Clips mit bekanntem Titel erscheinen in der
-  Quellenliste als „Clip-ID – Titel“.
+  einen höheren Frame-Wert zeigt. Ergebnisse werden je Clip gespeichert
+  (überleben Neustarts).
+- **Titel und Länge aller Clips** liest die Integration beim Einlesen der
+  Bibliothek mit denselben Befehlen, die Doremis eigenes Tool benutzt
+  (`E6.09.00.BE.10 <ID>` und `69.BB.02 <ID>`). Die Quellenliste zeigt
+  „Titel (Clip-ID)“, alphabetisch sortiert. Die Clip-ID entspricht den ersten
+  8 Zeichen der CPL-UUID.
 - **Startverzögerung:** Der Server prüft vor dem Abspielen u. a. KDM und
   Projektor-Verbindung, das kann bis ~30 s dauern. Nach „Play“ aus HA zeigt der
   Player daher „Startet …“ (Transport-Sensor `starting`), bis der Film läuft.
@@ -146,6 +150,9 @@ Grundlage sind die Doremi-Dokumente *DCP-2000 API Description* v1.0/v1.5 und
   ist mit `01.09` angegeben (kollidiert mit „GetSPLList Request“) – es wird
   `01.08` und `01.09` akzeptiert; bei „RetrSPL Response“ steht die Request-ID
   hinter dem XML – beide Reihenfolgen werden gelesen.
+- Doremis Verwaltungstool spricht dasselbe Sony-9-Pin-Protokoll über
+  **UDP 32896** (10-Byte-Vorspann `00 01 <Länge 16 bit> 00×6`); die Befehle
+  funktionieren identisch über TCP 5000.
 - `JumpForward/Backward` ignorieren laut Doku die Zeitangabe (fest 3 min) und
   funktionieren nur in Pause.
 

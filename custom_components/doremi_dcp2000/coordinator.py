@@ -74,6 +74,12 @@ class DCPData:
         return round(min(100.0, 100.0 * self.frame / self.last_frame), 1)
 
 
+def clip_label(clip: bytes, title: str | None) -> str:
+    """Source-list entry: 'Title (clip id)' so the list sorts by title."""
+    clip_id = p.clip_id_to_str(clip)
+    return f"{title} ({clip_id})" if title else clip_id
+
+
 type DCPConfigEntry = ConfigEntry[DCPCoordinator]
 
 
@@ -221,9 +227,8 @@ class DCPCoordinator(DataUpdateCoordinator[DCPData]):
         if data.title:
             self._titles[data.clip_id] = data.title
             self._remember(data.clip_id, title=data.title)
-            label = p.clip_id_to_str(data.clip_id)
             data.clips = {k: v for k, v in data.clips.items() if v != data.clip_id}
-            data.clips[f"{label} – {data.title}"] = data.clip_id
+            data.clips[clip_label(data.clip_id, data.title)] = data.clip_id
 
     async def _refresh_library(self, data: DCPData) -> None:
         try:
@@ -233,27 +238,35 @@ class DCPCoordinator(DataUpdateCoordinator[DCPData]):
             clips = []
         names: dict[str, bytes] = {}
         for clip in clips:
-            label = p.clip_id_to_str(clip)
             title = await self._clip_title(clip)
-            names[f"{label} – {title}" if title else label] = clip
+            names[clip_label(clip, title)] = clip
         data.clips = names
         self._library_at = time.monotonic()
 
     async def _clip_title(self, clip: bytes) -> str | None:
-        """Title of a clip that is not loaded (needs the KLV API)."""
+        """Title of a clip that is not loaded; cached per clip."""
         if clip in self._titles:
             return self._titles[clip]
         title = self._cache.get(p.clip_id_to_str(clip), {}).get("title")
         if title:
             self._titles[clip] = title
             return title
-        if self.klv and self._ext_supported:
+        if self._ext_supported:
+            try:
+                title = await self.client.title_for_id(clip)
+                frames = await self.client.frames_for_id(clip)
+            except DCPCommandError as err:
+                _LOGGER.debug("No title for %r: %s", clip, err)
+                frames = None
+            if title:
+                self._remember(clip, title=title, **({"frames": frames} if frames else {}))
+        if not title and self.klv and self._ext_supported:
             try:
                 uuid = await self.client.uuid_for_id(clip)
                 if uuid:
                     title = (await self.klv.get_cpl(uuid)).title or None
             except (DCPError, ValueError) as err:
-                _LOGGER.debug("No title for %r: %s", clip, err)
+                _LOGGER.debug("No KLV title for %r: %s", clip, err)
         self._titles[clip] = title
         return title
 
@@ -324,7 +337,7 @@ class DCPCoordinator(DataUpdateCoordinator[DCPData]):
         if name in clips:
             return clips[name]
         for label, raw in clips.items():
-            if p.clip_id_to_str(raw) == name or label.split(" – ", 1)[-1] == name:
+            if p.clip_id_to_str(raw) == name or self._titles.get(raw) == name:
                 return raw
         return p.clip_id_from_str(name)
 

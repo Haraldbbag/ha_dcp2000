@@ -290,6 +290,18 @@ class DCP2000Client:
         reply = await self.ext_command(p.EXT_TITLE, b"\x10")
         return p.decode_text(reply.data[1:]) or None if len(reply.data) > 1 else None
 
+    async def title_for_id(self, clip_id: bytes) -> str | None:
+        """Content title of any clip (E6.09.00.BE.10 <id>, as used by Doremi's tools)."""
+        reply = await self.ext_command(p.EXT_TITLE, b"\x10" + clip_id)
+        return p.decode_text(reply.data[1:]) or None if len(reply.data) > 1 else None
+
+    async def frames_for_id(self, clip_id: bytes) -> int | None:
+        """Length in frames of any clip (69.BB.02 <id>, undocumented)."""
+        reply = await self.command(p.CMD_CLIP_INFO, b"\x02" + clip_id)
+        if len(reply.data) >= 2 and reply.data[0] == 0x02:
+            return int.from_bytes(reply.data[1:], "big")
+        return None
+
     async def product_name(self) -> str:
         return p.decode_text((await self.command(p.CMD_PRODUCT_NAME)).data)
 

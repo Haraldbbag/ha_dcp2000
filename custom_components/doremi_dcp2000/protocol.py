@@ -154,6 +154,7 @@ CMD_ERASE_ID = (0xA, 0x10)
 CMD_LIST_FIRST = (0xA, 0x14)
 CMD_LIST_NEXT = (0xA, 0x15)
 CMD_DEVICE_ID = (0xA, 0x21)
+CMD_CLIP_INFO = (0x6, 0xBB)  # 69.BB.<sub>.<id>; sub 0x02 = length in frames (seen in Doremi tools)
 # Extended
 EXT_UUID_ID = (0x6, 0xBD)  # sub 0x20: ID -> UUID, 0x21: UUID -> ID
 EXT_TITLE = (0x6, 0xBE)  # sub 0x10: content title text

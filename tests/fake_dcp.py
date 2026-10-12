@@ -97,9 +97,10 @@ def handle_s9p(st: State, frame: bytes) -> bytes:
                 return ext_reply(0xBD, b"\x20")
             return ext_reply(0xBD, b"\x20" + CLIPS[clip][1].bytes)
         if r.cmd2 == 0xBE and sub == b"\x10":
-            if not st.clip:
+            clip = r.data[1:9] if len(r.data) > 1 else st.clip
+            if clip not in CLIPS:
                 return ext_reply(0xBE, b"\x10")
-            return ext_reply(0xBE, b"\x10" + CLIPS[st.clip][0].encode())
+            return ext_reply(0xBE, b"\x10" + CLIPS[clip][0].encode() + b"\x00")
         return NAK
     if key == p.CMD_STOP:
         st.playing = st.still = False
@@ -155,6 +156,11 @@ def handle_s9p(st: State, frame: bytes) -> bytes:
             return NAK
         st.list_pos += 1
         return reply(0x8, 0x14, ids[st.list_pos - 1])
+    if key == p.CMD_CLIP_INFO and r.data[:1] == b"\x02":
+        clip = r.data[1:9]
+        if clip not in CLIPS:
+            return NAK
+        return reply(0x7, 0xBB, b"\x02" + CLIPS[clip][2].to_bytes(8, "big"))
     if key == p.CMD_GPI_SENSE:
         return reply(0x7, 0xBF, bytes([0x00, st.gpi]))
     if key == p.CMD_GPO_SET:

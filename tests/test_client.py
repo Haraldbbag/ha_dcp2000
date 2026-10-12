@@ -63,6 +63,8 @@ async def _steps(st):
         assert await c.current_uuid() == "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
         assert await c.uuid_for_id(b"FEATURE\x00") == "12345678-1234-1234-1234-123456789abc"
         assert await c.current_title() == "Trailer Herbst"
+        assert await c.title_for_id(b"FEATURE\x00") == "Hauptfilm"
+        assert await c.frames_for_id(b"FEATURE\x00") == 172800
         assert (await c.status()).state == "paused"  # real server: still after cue
 
         await c.play()
