@@ -110,8 +110,10 @@ spl_load:
       integration: doremi_dcp2000
       domain: media_player
   fields:
+    spl_uuid:
+      selector:
+        text:
     xml:
-      required: true
       selector:
         text:
           multiline: true

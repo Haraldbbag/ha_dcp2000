@@ -40,7 +40,7 @@
         },
         "data_description": {
           "fps": "Used when the frame rate cannot be read from the CPL (needs KLV).",
-          "klv": "Adds SPL control, CPL titles and frame rates. Tested when saving."
+          "klv": "DCP-2000 Messages API on port 11730: exact frame rates and titles for all CPLs, SPL control. Tested when saving."
         }
       }
     },
@@ -94,7 +94,8 @@
         "state": {
           "playing": "Playing",
           "paused": "Paused",
-          "stopped": "Stopped"
+          "stopped": "Stopped",
+          "unknown": "Unknown"
         }
       },
       "spl_progress": {
@@ -250,7 +251,7 @@
     },
     "spl_load": {
       "name": "Load show playlist",
-      "description": "Sends SPL XML to the server (KLV API).",
+      "description": "Loads a show playlist by UUID or XML (KLV API).",
       "fields": {
         "xml": {
           "name": "SPL XML",
@@ -259,6 +260,10 @@
         "store": {
           "name": "Store only",
           "description": "Store (ingest) instead of loading for playback."
+        },
+        "spl_uuid": {
+          "name": "SPL UUID",
+          "description": "Load a stored SPL by UUID (instead of XML)."
         }
       }
     },

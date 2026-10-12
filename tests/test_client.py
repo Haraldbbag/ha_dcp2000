@@ -21,7 +21,7 @@ def test_frames_match_docs():
     body = bytes.fromhex("43c8801000")
     assert p.raw_frame("43.C8.80.10.00") == body + bytes([sum(body) & 0xFF])
     assert p.decode_timecode(bytes([0x12, 0x34, 0x56, 0x01])) == "01:56:34:12"
-    assert p.klv_request("StatusSPL", 1)[:16].hex() == "060e2b340204010a0e10010101021300"
+    assert p.klv_request("StatusSPL", 1)[:16].hex() == "060e2b340205010a0e10010101031b00"  # v2.5 Table 37/38
 
 
 async def _scenario():
@@ -94,23 +94,34 @@ async def _steps(st):
         assert (await c.status()).state in ("paused", "playing")
         await c.close()
 
-        # KLV
-        assert await probe_klv("127.0.0.1", 15730) == 0x04
+        # KLV (v2.5)
+        assert await probe_klv("127.0.0.1", 15730) == 0x05
         assert await probe_klv("127.0.0.1", 15999, timeout=0.5) is None
         k = KLVClient("127.0.0.1", 15730)
+        assert await k.api_version() == "2.5.0"
+        assert (await k.product_info()).serial == "123456"
         cpls = await k.get_cpl_list()
         assert len(cpls) == len(fake_dcp.CLIPS)
-        info = await k.get_cpl("12345678-1234-1234-1234-123456789abc")
-        assert info.title == "Hauptfilm" and info.fps == 24 and info.kind == "feature"
+        info = await k.get_cpl("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
+        assert info.title == "Trailer Herbst" and info.fps == 25 and info.kind == "feature"
         assert info.width == 2048 and info.channels == 6 and not info.encrypted
         spl = await k.status_spl()
         assert spl.spl_uuid.startswith("99999999") and spl.spl_percent == 42
-        assert spl.cpl_uuid == "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+        assert spl.cpl_uuid is not None
         assert await k.get_spl_list() == [spl.spl_uuid]
-        assert await k.simple("PlaySPL") == 0
+        await k.simple("PlaySPL")
         assert (await k.retrieve_spl(spl.spl_uuid)).startswith("<ShowPlaylist>")
         await k.jump(-180)
+        await k.loop_mode(1)
+        try:
+            await k.load_spl_uuid("00000000-0000-0000-0000-000000000001")
+        except DCPCommandError as err:
+            assert "failed" in str(err)
+        else:
+            raise AssertionError("expected RRP failed")
         await k.close()
+        # draft-style key (byte 6 = 0x04) is rejected like the real server does
+        assert await probe_klv("127.0.0.1", 15730) == 0x05
 
 
 def test_scenario():

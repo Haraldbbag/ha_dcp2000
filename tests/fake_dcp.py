@@ -189,8 +189,8 @@ async def serve_s9p(st: State, reader, writer) -> None:
         writer.close()
 
 
-def klv_resp(set_kind: int, msg_kind: int, value: bytes) -> bytes:
-    return p.klv_key(set_kind, msg_kind + 1) + p.ber4(len(value)) + value
+def klv_resp(b14: int, b15: int, b16: int, value: bytes) -> bytes:
+    return p.klv_key(b14, b15 + 1, b16) + p.ber4(len(value)) + value
 
 
 def batch(items: list[bytes]) -> bytes:
@@ -199,37 +199,53 @@ def batch(items: list[bytes]) -> bytes:
 
 async def serve_klv(st: State, reader, writer) -> None:
     spl = uuid.UUID("99999999-8888-7777-6666-555555555555")
+    by_uuid = {c[1]: (k, c) for k, c in CLIPS.items()}
     try:
         while True:
             key = await reader.readexactly(16)
+            if key[5] != 0x05:  # wrong key -> real server hangs up
+                break
             length, _ = p.parse_ber_length(await reader.readexactly(4))
             value = await reader.readexactly(length)
-            sk, mk, rid = key[13], key[14], value[:4]
-            name = next(n for n, v in p.KLV_MESSAGES.items() if v == (sk, mk))
+            b14, b15, b16, rid = key[13], key[14], key[15], value[:4]
+            name = next((n for n, v in p.KLV_MESSAGES.items() if v == (b14, b15, b16)), None)
+            if name is None:
+                break
+            ok = b"\x00"
             if name == "GetCPLList":
-                out = rid + batch([c[1].bytes for c in CLIPS.values()]) + b"\x00"
+                out = rid + batch([c[1].bytes for c in CLIPS.values()]) + ok
             elif name == "GetSPLList":
-                out = rid + batch([spl.bytes]) + b"\x00"
+                out = rid + batch([spl.bytes]) + ok
             elif name == "GetKDMList":
-                out = rid + batch([]) + b"\x00"
-            elif name == "GetCPL":
+                out = rid + batch([]) + ok
+            elif name == "GetCPLInfo":
                 cu = uuid.UUID(bytes=value[4:20])
-                title, _, dur = next(c for c in CLIPS.values() if c[1] == cu)
-                out = (rid + cu.bytes + title.encode().ljust(128, b"\x00") + b"\x01"
-                       + struct.pack(">III", dur, 24, 1) + b"\x02" + struct.pack(">HH", 2048, 858)
-                       + b"\x00\x03\x06\x18\x00" + batch([]))
+                clip, (title, _, dur) = by_uuid[cu]
+                out = (rid + cu.bytes + b"\x01" + title.encode().ljust(128, b"\x00") + b"\x01"
+                       + struct.pack(">III", dur, FPS.get(clip, 24) * 1000, 1000)
+                       + b"\x02" + struct.pack(">HH", 2048, 858)
+                       + b"\x00\x03\x06\x18\x00" + batch([]) + ok)
             elif name == "StatusSPL":
                 cpl = CLIPS[st.clip][1].bytes if st.clip else b"\x00" * 16
-                out = (rid + bytes([1 if st.playing else 0]) + spl.bytes + bytes([42])
-                       + (5400).to_bytes(4, "big") + cpl + bytes([10]) + b"\x00")
+                out = (rid + bytes([2 if st.playing else 3]) + spl.bytes
+                       + struct.pack(">II", 2268, 5400) + cpl + b"\x00" * 32
+                       + struct.pack(">II", 10, 100) + ok)
             elif name == "RetrSPL":
-                out = b"<ShowPlaylist><Id>urn:uuid:" + str(spl).encode() + b"</Id></ShowPlaylist>" + rid
+                out = rid + b"<ShowPlaylist><Id>urn:uuid:" + str(spl).encode() + b"</Id></ShowPlaylist>" + ok
+            elif name == "GetAPIProtocolVersion":
+                out = rid + bytes([2, 5, 0]) + ok
+            elif name == "GetProductInfo":
+                out = (rid + b"DCP2000".ljust(16, b"\x00") + b"123456".ljust(16, b"\x00")
+                       + uuid.uuid4().bytes + bytes([4, 2, 1, 0, 1, 0, 0, 7]) + ok)
+            elif name == "LoadSPLbyUUID" and value[4:20] != spl.bytes:
+                out = rid + b"\x01"  # failed
             else:
-                out = rid + b"\x00"
-            writer.write(klv_resp(sk, mk, out))
+                out = rid + ok
+            writer.write(klv_resp(b14, b15, b16, out))
             await writer.drain()
-    except (asyncio.IncompleteReadError, ConnectionError, StopIteration):
-        writer.close()
+    except (asyncio.IncompleteReadError, ConnectionError, StopIteration, KeyError):
+        pass
+    writer.close()
 
 
 async def start(host: str = "127.0.0.1", port: int = 5000, klv_port: int = 11730):

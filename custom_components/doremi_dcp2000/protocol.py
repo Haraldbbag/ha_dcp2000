@@ -343,49 +343,52 @@ class TransportStatus:
 
 
 # --------------------------------------------------------------------------
-# KLV (CPL & SPL API)
+# KLV ("DCP-2000 Messages", Doremi doc CSL.TD.000109.DRM v2.5, TCP 11730)
 # --------------------------------------------------------------------------
 
 KLV_KEY_PREFIX = bytes.fromhex("060e2b3402")
-# byte 6 is 0x04 in the 2006 draft, later firmware is reported to use 0x05.
-KLV_KEY_REG_DESIGNATORS = (0x04, 0x05)
+# Byte 6: 0x05 in v2.5 (fixed length pack); the 2006 draft used 0x04.
+KLV_KEY_REG_DESIGNATORS = (0x05, 0x04)
 
-KLV_MESSAGES: dict[str, tuple[int, int]] = {
-    "GetCPLList": (0x01, 0x01),
-    "GetKDMList": (0x01, 0x03),
-    "GetKDM": (0x01, 0x05),
-    "GetCPL": (0x01, 0x07),
-    "GetSPLList": (0x01, 0x09),
-    "LoadSPL": (0x02, 0x01),
-    "PlaySPL": (0x02, 0x03),
-    "PauseSPL": (0x02, 0x05),
-    "EjectSPL": (0x02, 0x07),
-    "SkipForward": (0x02, 0x09),
-    "SkipBackward": (0x02, 0x0B),
-    "JumpForward": (0x02, 0x0D),
-    "JumpBackward": (0x02, 0x0F),
-    "LoopModeSPL": (0x02, 0x11),
-    "StatusSPL": (0x02, 0x13),
-    "RetrSPL": (0x02, 0x15),
-    "StoreSPL": (0x02, 0x17),
-    "LoadSPLbyUUID": (0x02, 0x19),
+# name -> (byte 14, byte 15, byte 16) of the request key; response = byte 15 + 1
+KLV_MESSAGES: dict[str, tuple[int, int, int]] = {
+    "GetCPLList": (0x01, 0x01, 0x00),
+    "GetCPLInfo": (0x01, 0x03, 0x00),
+    "GetKDMList": (0x02, 0x01, 0x00),
+    "GetSPLList": (0x03, 0x01, 0x00),
+    "GetSPLInfo": (0x03, 0x03, 0x00),
+    "LoadSPL": (0x03, 0x07, 0x00),
+    "LoadSPLbyUUID": (0x03, 0x09, 0x00),
+    "PlaySPL": (0x03, 0x0B, 0x00),
+    "PauseSPL": (0x03, 0x0D, 0x00),
+    "EjectSPL": (0x03, 0x0F, 0x00),
+    "SkipForward": (0x03, 0x11, 0x00),
+    "SkipBackward": (0x03, 0x13, 0x00),
+    "JumpForward": (0x03, 0x15, 0x00),
+    "JumpBackward": (0x03, 0x17, 0x00),
+    "LoopModeSPL": (0x03, 0x19, 0x00),
+    "StatusSPL": (0x03, 0x1B, 0x00),
+    "RetrSPL": (0x03, 0x1D, 0x00),
+    "StoreSPL": (0x03, 0x1F, 0x00),
+    "GetLoopModeSPL": (0x03, 0x23, 0x00),
+    "GetProductInfo": (0x05, 0x01, 0x00),
+    "GetAPIProtocolVersion": (0x05, 0x05, 0x00),
 }
-# Responses are request + 1. The draft lists GetCPL Response as 01.09, which
-# collides with GetSPLList Request; we accept both 01.08 and 01.09 there.
 
-PLAYBACK_STATES = {0: "stopped", 1: "playing", 2: "paused"}
+RESPONSE_CODES = {0: "ok", 1: "failed", 2: "invalid parameter", 3: "busy"}
+PLAYBACK_STATES = {0: "unknown", 1: "stopped", 2: "playing", 3: "paused"}
+LOOP_MODES = {"once": 0, "loop": 1, "rewind": 2, "eject": 3}
 CONTENT_KINDS = {
     0: "unknown", 1: "feature", 2: "trailer", 3: "test", 4: "teaser", 5: "rating",
-    6: "advertisement", 7: "short", 8: "transitional", 9: "psa", 10: "policy",
+    6: "advertisement", 7: "short", 8: "transitional", 9: "psa", 10: "policy", 0x80: "live",
 }
 ENCODINGS = {0: "unknown", 1: "MPEG2", 2: "JPEG2000", 3: "PCM"}
 ENCRYPTION = {0: "none", 1: "AES-128-CBC"}
 
 
-def klv_key(set_kind: int, msg_kind: int, reg: int = 0x04) -> bytes:
+def klv_key(b14: int, b15: int, b16: int = 0, reg: int = 0x05) -> bytes:
     return (
-        KLV_KEY_PREFIX + bytes([reg]) + bytes([0x01, 0x0A, 0x0E, 0x10, 0x01, 0x01, 0x01])
-        + bytes([set_kind, msg_kind, 0x00])
+        KLV_KEY_PREFIX + bytes([reg, 0x01, 0x0A, 0x0E, 0x10, 0x01, 0x01, 0x01, b14, b15, b16])
     )
 
 
@@ -393,10 +396,10 @@ def ber4(length: int) -> bytes:
     return bytes([0x83]) + length.to_bytes(3, "big")
 
 
-def klv_request(name: str, request_id: int, payload: bytes = b"", reg: int = 0x04) -> bytes:
-    set_kind, msg_kind = KLV_MESSAGES[name]
+def klv_request(name: str, request_id: int, payload: bytes = b"", reg: int = 0x05) -> bytes:
+    b14, b15, b16 = KLV_MESSAGES[name]
     value = request_id.to_bytes(4, "big") + payload
-    return klv_key(set_kind, msg_kind, reg) + ber4(len(value)) + value
+    return klv_key(b14, b15, b16, reg) + ber4(len(value)) + value
 
 
 def parse_ber_length(buf: bytes) -> tuple[int, int]:
@@ -414,9 +417,18 @@ def is_klv_key(key: bytes) -> bool:
 
 @dataclass(slots=True)
 class KlvMessage:
-    set_kind: int
-    msg_kind: int
+    b14: int
+    b15: int
+    b16: int
     value: bytes
+
+    @property
+    def request_id(self) -> int:
+        return int.from_bytes(self.value[:4], "big")
+
+    @property
+    def response(self) -> int | None:
+        return self.value[-1] if len(self.value) > 4 else None
 
 
 def parse_uuid_batch(data: bytes, offset: int = 0) -> tuple[list[str], int]:
@@ -446,12 +458,13 @@ class CplInfo:
     channels: int
     sound_bits: int
     sound_encryption: str
+    storage: int = 1
     key_ids: list[str] = field(default_factory=list)
 
     @property
     def fps(self) -> float:
         num, den = self.edit_rate
-        return num / den if den else 24.0
+        return round(num / den, 3) if num and den else 0.0
 
     @property
     def encrypted(self) -> bool:
@@ -462,7 +475,8 @@ def parse_get_cpl(value: bytes) -> CplInfo:
     v = value[4:]  # skip request id
     o = 0
     cpl = str(uuidlib.UUID(bytes=v[o : o + 16])); o += 16
-    title = decode_text(v[o : o + 128]); o += 128
+    storage = v[o]; o += 1
+    title = v[o : o + 128].split(b"\x00", 1)[0].decode("utf-8", errors="replace"); o += 128
     kind = v[o]; o += 1
     duration, er_a, er_b = struct.unpack_from(">III", v, o); o += 12
     pic_enc = v[o]; o += 1
@@ -478,7 +492,7 @@ def parse_get_cpl(value: bytes) -> CplInfo:
         picture_encryption=ENCRYPTION.get(pic_crypt, str(pic_crypt)),
         sound_encoding=ENCODINGS.get(snd_enc, str(snd_enc)), channels=channels,
         sound_bits=bits, sound_encryption=ENCRYPTION.get(snd_crypt, str(snd_crypt)),
-        key_ids=keys,
+        storage=storage, key_ids=keys,
     )
 
 
@@ -486,11 +500,15 @@ def parse_get_cpl(value: bytes) -> CplInfo:
 class SplStatus:
     state: str
     spl_uuid: str | None
-    spl_percent: int
-    spl_duration: int
+    position: int  # seconds
+    duration: int  # seconds
     cpl_uuid: str | None
-    cpl_percent: int
-    response: int
+    element_position: int
+    element_duration: int
+
+    @property
+    def spl_percent(self) -> int | None:
+        return round(100 * self.position / self.duration) if self.duration else None
 
 
 def _uuid_or_none(raw: bytes) -> str | None:
@@ -501,23 +519,28 @@ def parse_status_spl(value: bytes) -> SplStatus:
     v = value[4:]
     state = v[0]
     spl = _uuid_or_none(v[1:17])
-    spl_pct = v[17]
-    duration = int.from_bytes(v[18:22], "big")
-    cpl = _uuid_or_none(v[22:38])
-    cpl_pct = v[38]
-    resp = v[39] if len(v) > 39 else 0
-    return SplStatus(PLAYBACK_STATES.get(state, f"0x{state:02X}"), spl, spl_pct,
-                     duration, cpl, cpl_pct, resp)
+    position, duration = struct.unpack_from(">II", v, 17)
+    cpl = _uuid_or_none(v[25:41])
+    # v[41:57] event id, v[57:73] element id
+    el_pos, el_dur = struct.unpack_from(">II", v, 73) if len(v) >= 81 else (0, 0)
+    return SplStatus(PLAYBACK_STATES.get(state, f"0x{state:02X}"), spl, position, duration,
+                     cpl, el_pos, el_dur)
 
 
-def parse_get_kdm(value: bytes) -> dict:
+@dataclass(slots=True)
+class ProductInfo:
+    name: str
+    serial: str
+    product_id: str
+    software: str
+    hardware: str
+
+
+def parse_product_info(value: bytes) -> ProductInfo:
     v = value[4:]
-    kdm = str(uuidlib.UUID(bytes=v[0:16]))
-    cpl = str(uuidlib.UUID(bytes=v[16:32]))
-    nvb, nva = struct.unpack_from(">QQ", v, 32)
-    keys, o = parse_uuid_batch(v, 48)
-    return {
-        "kdm_uuid": kdm, "cpl_uuid": cpl, "not_valid_before": nvb,
-        "not_valid_after": nva, "key_ids": keys,
-        "response": v[o] if len(v) > o else None,
-    }
+    name = v[0:16].split(b"\x00", 1)[0].decode("utf-8", errors="replace")
+    serial = v[16:32].split(b"\x00", 1)[0].decode("utf-8", errors="replace")
+    pid = str(uuidlib.UUID(bytes=v[32:48]))
+    sw = ".".join(str(x) for x in v[48:52])
+    hw = ".".join(str(x) for x in v[52:56])
+    return ProductInfo(name, serial, pid, sw, hw)

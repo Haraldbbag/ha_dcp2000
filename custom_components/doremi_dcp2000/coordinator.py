@@ -236,12 +236,49 @@ class DCPCoordinator(DataUpdateCoordinator[DCPData]):
         except DCPCommandError as err:
             _LOGGER.debug("Listing clips failed: %s", err)
             clips = []
+        if self.klv:
+            await self._enrich_from_klv(clips)
         names: dict[str, bytes] = {}
         for clip in clips:
             title = await self._clip_title(clip)
             names[clip_label(clip, title)] = clip
         data.clips = names
         self._library_at = time.monotonic()
+
+    async def _enrich_from_klv(self, clips: list[bytes]) -> None:
+        """Exact edit rate, title and kind for every CPL via GetCPLInfo."""
+        missing = [
+            c for c in clips
+            if self._cache.get(p.clip_id_to_str(c), {}).get("fps_source") != "cpl"
+        ]
+        if not missing:
+            return
+        try:
+            by_prefix = {u.replace("-", "")[:8]: u for u in await self.klv.get_cpl_list()}
+        except DCPError as err:
+            _LOGGER.debug("GetCPLList failed: %s", err)
+            return
+        for clip in missing:
+            uuid = by_prefix.get(p.clip_id_to_str(clip).lower())
+            if not uuid and self._ext_supported:
+                try:  # clip ids are normally the first 8 hex digits of the CPL UUID
+                    uuid = await self.client.uuid_for_id(clip)
+                except DCPCommandError:
+                    uuid = None
+            if not uuid:
+                continue
+            try:
+                info = await self.klv.get_cpl(uuid)
+            except (DCPError, ValueError) as err:
+                _LOGGER.debug("GetCPLInfo %s failed: %s", uuid, err)
+                continue
+            values = {"uuid": uuid, "kind": info.kind, "frames": info.duration}
+            if info.title:
+                values["title"] = info.title
+                self._titles[clip] = info.title
+            if info.fps:
+                values |= {"fps": info.fps, "fps_source": "cpl"}
+            self._remember(clip, **values)
 
     async def _clip_title(self, clip: bytes) -> str | None:
         """Title of a clip that is not loaded; cached per clip."""

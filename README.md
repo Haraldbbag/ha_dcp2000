@@ -143,13 +143,12 @@ Grundlage sind die Doremi-Dokumente *DCP-2000 API Description* v1.0/v1.5 und
   Verbindungsabbruch wird automatisch neu verbunden.
 - **Clip laden:** wie im Dokument empfohlen per Auto-Modus
   (`40.41` → `48.14 <ID>` → `40.15`), nicht per veraltetem `24.31`.
-- **KLV (CPL/SPL):** Das Dokument nennt keinen Port; 11730 ist der übliche
-  Doremi-Port, daher einstellbar. Das Byte 6 des Pack-Keys wird beim Speichern
-  automatisch ermittelt (0x04 laut Entwurf, 0x05 bei neuerer Firmware).
-- **Unstimmigkeiten im Entwurf**, die die Integration abfängt: „GetCPL Response“
-  ist mit `01.09` angegeben (kollidiert mit „GetSPLList Request“) – es wird
-  `01.08` und `01.09` akzeptiert; bei „RetrSPL Response“ steht die Request-ID
-  hinter dem XML – beide Reihenfolgen werden gelesen.
+- **KLV-API („DCP-2000 Messages“, Doremi-Dokument CSL.TD.000109.DRM v2.5)** auf
+  TCP **11730**: Nachrichtencodes und Felder nach v2.5 (der Entwurf von 2006
+  verwendet andere Codes, darauf legt der Server einfach auf). Wird beim
+  Einrichten automatisch erkannt und aktiviert; liefert über `GetCPLInfo` die
+  exakte Bildrate jedes CPL, dazu Typ, Auflösung, Verschlüsselung, sowie
+  SPL-Steuerung und -Status.
 - Doremis Verwaltungstool spricht dasselbe Sony-9-Pin-Protokoll über
   **UDP 32896** (10-Byte-Vorspann `00 01 <Länge 16 bit> 00×6`); die Befehle
   funktionieren identisch über TCP 5000.

@@ -40,7 +40,7 @@
         },
         "data_description": {
           "fps": "Wird genutzt, wenn die Bildrate nicht aus dem CPL gelesen werden kann (braucht KLV).",
-          "klv": "Ergänzt SPL-Steuerung, CPL-Titel und Bildraten. Wird beim Speichern getestet."
+          "klv": "DCP-2000-Messages-API auf Port 11730: exakte Bildraten und Titel aller CPLs, SPL-Steuerung. Wird beim Speichern getestet."
         }
       }
     },
@@ -94,7 +94,8 @@
         "state": {
           "playing": "Wiedergabe",
           "paused": "Pause",
-          "stopped": "Gestoppt"
+          "stopped": "Gestoppt",
+          "unknown": "Unbekannt"
         }
       },
       "spl_progress": {
@@ -250,7 +251,7 @@
     },
     "spl_load": {
       "name": "Show-Playlist laden",
-      "description": "Sendet SPL-XML an den Server (KLV-API).",
+      "description": "Lädt eine Show-Playlist per UUID oder XML (KLV-API).",
       "fields": {
         "xml": {
           "name": "SPL-XML",
@@ -259,6 +260,10 @@
         "store": {
           "name": "Nur speichern",
           "description": "Speichern (StoreSPL) statt zum Abspielen laden."
+        },
+        "spl_uuid": {
+          "name": "SPL-UUID",
+          "description": "Gespeicherte SPL per UUID laden (statt XML)."
         }
       }
     },

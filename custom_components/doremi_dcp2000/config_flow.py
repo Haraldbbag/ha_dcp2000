@@ -65,8 +65,13 @@ class DCP2000ConfigFlow(ConfigFlow, domain=DOMAIN):
                 await self.async_set_unique_id(_unique_id(info, host))
                 self._abort_if_unique_id_configured(updates={CONF_HOST: host, CONF_PORT: port})
                 name = user_input.get(CONF_NAME) or f"{info.product or 'DCP-2000'} {host}"
+                # Enable the KLV API (exact frame rates, SPL control) when it answers.
+                options: dict[str, Any] = {}
+                reg = await probe_klv(host, DEFAULT_KLV_PORT)
+                if reg is not None:
+                    options = {CONF_KLV: True, CONF_KLV_PORT: DEFAULT_KLV_PORT, CONF_KLV_REG: reg}
                 return self.async_create_entry(
-                    title=name, data={CONF_HOST: host, CONF_PORT: port}
+                    title=name, data={CONF_HOST: host, CONF_PORT: port}, options=options
                 )
         schema = vol.Schema(
             {

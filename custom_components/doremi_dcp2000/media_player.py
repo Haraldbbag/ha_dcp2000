@@ -85,7 +85,12 @@ async def async_setup_entry(
     )
     # --- SPL (KLV API) ---
     platform.async_register_entity_service(
-        "spl_load", {vol.Required("xml"): cv.string, vol.Optional("store", default=False): cv.boolean},
+        "spl_load",
+        {
+            vol.Exclusive("xml", "spl"): cv.string,
+            vol.Exclusive("spl_uuid", "spl"): cv.string,
+            vol.Optional("store", default=False): cv.boolean,
+        },
         "async_spl_load",
     )
     platform.async_register_entity_service(
@@ -309,9 +314,16 @@ class DCPMediaPlayer(DCPEntity, MediaPlayerEntity):
             result["kdms"] = await self._run(klv.get_kdm_list(), refresh=False)
         return result
 
-    async def async_spl_load(self, xml: str, store: bool = False) -> None:
+    async def async_spl_load(
+        self, xml: str | None = None, spl_uuid: str | None = None, store: bool = False
+    ) -> None:
         klv = self._require_klv()
-        await self._run(klv.store_spl(xml) if store else klv.load_spl(xml))
+        if spl_uuid:
+            await self._run(klv.load_spl_uuid(spl_uuid))
+        elif xml:
+            await self._run(klv.store_spl(xml) if store else klv.load_spl(xml))
+        else:
+            raise ServiceValidationError("Provide either xml or spl_uuid.")
 
     async def async_spl_command(self, command: str) -> None:
         klv = self._require_klv()
@@ -321,8 +333,8 @@ class DCPMediaPlayer(DCPEntity, MediaPlayerEntity):
             "eject": lambda: klv.simple("EjectSPL"),
             "skip_forward": lambda: klv.simple("SkipForward"),
             "skip_backward": lambda: klv.simple("SkipBackward"),
-            "loop_on": lambda: klv.loop_mode(True),
-            "loop_off": lambda: klv.loop_mode(False),
+            "loop_on": lambda: klv.loop_mode(1),
+            "loop_off": lambda: klv.loop_mode(0),
         }
         await self._run(actions[command]())
 

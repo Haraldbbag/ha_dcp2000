@@ -75,7 +75,7 @@ SENSORS: tuple[DCPSensorDescription, ...] = (
     ),
     DCPSensorDescription(
         key="spl_state", translation_key="spl_state", device_class=SensorDeviceClass.ENUM,
-        options=["stopped", "playing", "paused"], klv_only=True,
+        options=["stopped", "playing", "paused", "unknown"], klv_only=True,
         value_fn=lambda d: d.spl.state if d.spl else None,
     ),
     DCPSensorDescription(

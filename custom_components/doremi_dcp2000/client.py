@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 import itertools
+import uuid as uuidlib
 import logging
 
 from . import protocol as p
@@ -362,9 +363,9 @@ class DCP2000Client:
 
 
 class KLVClient:
-    """CPL & SPL API (KLV encoded)."""
+    """DCP-2000 Messages API (KLV over TCP 11730, Doremi doc v2.5)."""
 
-    def __init__(self, host: str, port: int, reg: int = 0x04,
+    def __init__(self, host: str, port: int, reg: int = 0x05,
                  timeout: float = DEFAULT_TIMEOUT) -> None:
         self._conn = _Connection(host, port, timeout)
         self.reg = reg
@@ -385,79 +386,75 @@ class KLVClient:
         else:
             length = first[0]
         value = await reader.readexactly(length)
-        return p.KlvMessage(key[13], key[14], value)
+        return p.KlvMessage(key[13], key[14], key[15], value)
 
     async def request(self, name: str, payload: bytes = b"") -> p.KlvMessage:
-        req_id = next(self._ids) & 0xFFFFFFFF
-        set_kind, msg_kind = p.KLV_MESSAGES[name]
+        req_id = (next(self._ids) & 0x7FFFFFFF) or 1  # must be non-zero
+        b14, b15, b16 = p.KLV_MESSAGES[name]
 
         async def read(reader):
             while True:
                 msg = await self._read_klv(reader)
-                if msg.set_kind == set_kind and msg.msg_kind in (msg_kind + 1, msg_kind + 2):
+                if (msg.b14, msg.b15) == (b14, b15 + 1) and msg.request_id == req_id:
                     return msg
-                _LOGGER.debug("Skipping KLV %02X.%02X", msg.set_kind, msg.msg_kind)
+                _LOGGER.debug("Skipping KLV %02X.%02X", msg.b14, msg.b15)
 
-        return await self._conn._exchange(p.klv_request(name, req_id, payload, self.reg), read)
+        msg = await self._conn._exchange(p.klv_request(name, req_id, payload, self.reg), read)
+        if msg.response:
+            raise DCPCommandError(
+                f"{name}: {p.RESPONSE_CODES.get(msg.response, msg.response)}"
+            )
+        return msg
 
-    @staticmethod
-    def _check(msg: p.KlvMessage) -> int | None:
-        """Return the 'General Response info' byte (meaning undocumented)."""
-        code = msg.value[-1] if len(msg.value) > 4 else None
-        if code not in (None, 0):
-            _LOGGER.warning("KLV %02X.%02X returned response code %s",
-                            msg.set_kind, msg.msg_kind, code)
-        return code
+    async def api_version(self) -> str:
+        v = (await self.request("GetAPIProtocolVersion")).value[4:]
+        return ".".join(str(x) for x in v[:3])
+
+    async def product_info(self) -> p.ProductInfo:
+        return p.parse_product_info((await self.request("GetProductInfo")).value)
 
     async def get_cpl_list(self) -> list[str]:
-        msg = await self.request("GetCPLList")
-        return p.parse_uuid_batch(msg.value, 4)[0]
+        return p.parse_uuid_batch((await self.request("GetCPLList")).value, 4)[0]
 
     async def get_spl_list(self) -> list[str]:
-        msg = await self.request("GetSPLList")
-        return p.parse_uuid_batch(msg.value, 4)[0]
+        return p.parse_uuid_batch((await self.request("GetSPLList")).value, 4)[0]
 
     async def get_kdm_list(self) -> list[str]:
-        msg = await self.request("GetKDMList")
-        return p.parse_uuid_batch(msg.value, 4)[0]
+        return p.parse_uuid_batch((await self.request("GetKDMList")).value, 4)[0]
 
     async def get_cpl(self, cpl_uuid: str) -> p.CplInfo:
-        import uuid as uuidlib
-
-        msg = await self.request("GetCPL", uuidlib.UUID(cpl_uuid).bytes)
+        msg = await self.request("GetCPLInfo", uuidlib.UUID(cpl_uuid).bytes)
         return p.parse_get_cpl(msg.value)
 
-    async def get_kdm(self, kdm_uuid: str) -> dict:
-        import uuid as uuidlib
-
-        msg = await self.request("GetKDM", uuidlib.UUID(kdm_uuid).bytes)
-        return p.parse_get_kdm(msg.value)
+    async def get_spl_info(self, spl_uuid: str) -> dict:
+        v = (await self.request("GetSPLInfo", uuidlib.UUID(spl_uuid).bytes)).value[4:]
+        return {
+            "spl_uuid": str(uuidlib.UUID(bytes=v[0:16])),
+            "title": v[16:144].split(b"\x00", 1)[0].decode("utf-8", errors="replace"),
+            "duration_frames": int.from_bytes(v[144:148], "big"),
+        }
 
     async def status_spl(self) -> p.SplStatus:
         return p.parse_status_spl((await self.request("StatusSPL")).value)
 
     async def retrieve_spl(self, spl_uuid: str) -> str:
-        import uuid as uuidlib
+        value = (await self.request("RetrSPL", uuidlib.UUID(spl_uuid).bytes)).value
+        return value[4:-1].decode("utf-8", errors="replace")
 
-        msg = await self.request("RetrSPL", uuidlib.UUID(spl_uuid).bytes)
-        value = msg.value
-        # The draft puts the request id *after* the XML; tolerate both orders.
-        start = value.find(b"<")
-        body = value[start:] if start >= 0 else value
-        end = body.rfind(b">")
-        return body[: end + 1].decode("utf-8", errors="replace")
-
-    async def simple(self, name: str, payload: bytes = b"") -> int | None:
-        return self._check(await self.request(name, payload))
+    async def simple(self, name: str, payload: bytes = b"") -> None:
+        await self.request(name, payload)
 
     async def load_spl(self, xml: str) -> None:
         await self.simple("LoadSPL", xml.encode("utf-8"))
 
+    async def load_spl_uuid(self, spl_uuid: str) -> None:
+        await self.simple("LoadSPLbyUUID", uuidlib.UUID(spl_uuid).bytes)
+
     async def store_spl(self, xml: str) -> None:
         await self.simple("StoreSPL", xml.encode("utf-8"))
 
-    async def loop_mode(self, enabled: bool) -> None:
-        await self.simple("LoopModeSPL", b"\x01" if enabled else b"\x00")
+    async def loop_mode(self, mode: int | bool) -> None:
+        await self.simple("LoopModeSPL", bytes([int(mode)]))
 
     async def jump(self, seconds: int) -> None:
         name = "JumpForward" if seconds >= 0 else "JumpBackward"
@@ -465,11 +462,12 @@ class KLVClient:
 
 
 async def probe_klv(host: str, port: int, timeout: float = 3.0) -> int | None:
-    """Return the working registry designator byte, or None if KLV is unavailable."""
+    """Return the working key registry byte, or None if the KLV API is unavailable."""
     for reg in p.KLV_KEY_REG_DESIGNATORS:
         client = KLVClient(host, port, reg, timeout)
         try:
-            await client.request("StatusSPL")
+            version = await client.api_version()
+            _LOGGER.debug("KLV API %s on %s:%s (reg 0x%02X)", version, host, port, reg)
             return reg
         except DCPError as err:
             _LOGGER.debug("KLV probe reg=0x%02X failed: %s", reg, err)
