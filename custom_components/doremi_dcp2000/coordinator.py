@@ -26,11 +26,21 @@ from .const import (
     BURST_INTERVAL,
     BURST_SECONDS,
     LIBRARY_REFRESH,
+    MODE_CINEMA,
     PREVIOUS_THRESHOLD,
+    TRANSPORT_MODES,
     START_TIMEOUT,
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+
+class TransportLockedError(DCPError):
+    """A jump was refused because of the transport mode / state."""
+
+    def __init__(self, message: str, key: str) -> None:
+        super().__init__(message)
+        self.key = key
 
 
 @dataclass(slots=True)
@@ -123,6 +133,8 @@ class DCPCoordinator(DataUpdateCoordinator[DCPData]):
         self._start_requested: float | None = None
         self._start_park = False
         self._burst_task: asyncio.Task | None = None
+        self.transport_mode: str = MODE_CINEMA  # restored by the select entity
+        self._jump_lock = asyncio.Lock()
         self._burst_until = 0.0
         self._spl_autoplay_until: float | None = None
         self._spl_items_uuid: str | None = None
@@ -602,31 +614,123 @@ class DCPCoordinator(DataUpdateCoordinator[DCPData]):
                 return
         _LOGGER.debug("%s did not confirm pause after loading", self.client.host)
 
-    async def async_seek(self, timecode: str | None = None, position: float | None = None) -> None:
-        """Jump inside the current clip/element to a timecode or a position in seconds."""
-        fps = self.current_fps()
-        rate = round(fps)
-        if timecode:
-            parts = [int(x) for x in timecode.replace(".", ":").replace(";", ":").split(":")]
-            if len(parts) == 3:  # HH:MM:SS
-                parts.append(0)
-            parts = [0] * (4 - len(parts)) + parts
-            h, m, s, f = parts[-4:]
-            if f >= rate:
-                raise DCPCommandError(f"frame {f} is out of range for {fps:g} fps")
-            frame = ((h * 60 + m) * 60 + s) * rate + f
-        elif position is not None:
-            frame = round(max(0.0, position) * fps)
-        else:
-            raise DCPCommandError("timecode or position required")
+    # -- jumps: Cinema / Mediaplayer transport mode ----------------------------
+
+    def set_transport_mode(self, mode: str) -> None:
+        self.transport_mode = mode if mode in TRANSPORT_MODES else MODE_CINEMA
+        self.async_update_listeners()
+
+    async def _is_running(self) -> bool:
         if self.spl_loaded:
+            return (await self.klv.status_spl()).state == "playing"
+        return (await self.client.status()).state == "playing"
+
+    async def _current_frame(self) -> int:
+        try:
+            tc = await self.client.timecode_parts()
+        except DCPCommandError:
+            tc = None
+        return p.timecode_to_frames(tc, self.current_fps()) if tc else 0
+
+    def _clip_frames(self) -> int | None:
+        """Length of the clip / SPL element on screen, in frames."""
+        d = self.data
+        if self.spl_loaded and d and d.spl_index is not None and d.spl_items:
+            return round(d.spl_items[d.spl_index]["duration"] * self.current_fps()) or None
+        if d and d.last_frame and d.last_frame < 2**30:
+            return d.last_frame + 1
+        return None
+
+    async def _goto_frame(self, frame: int) -> int:
+        """Position the clip / SPL element at `frame` (server must be paused)."""
+        length = self._clip_frames()
+        frame = max(0, min(frame, length - 1)) if length else max(0, frame)
+        if self.spl_loaded:
+            rate = round(self.current_fps())
             secs, f = divmod(frame, rate)
-            mins, s = divmod(secs, 60)
+            mins, sec = divmod(secs, 60)
             h, m = divmod(mins, 60)
-            await self.klv.jump_to_timecode(f"{h:02d}:{m:02d}:{s:02d}.{f:02d}")
+            await self.klv.jump_to_timecode(f"{h:02d}:{m:02d}:{sec:02d}.{f:02d}")
         else:
             await self.client.locate(frame)
+        return frame
+
+    async def _jump(self, action, *, resume: bool = True) -> None:
+        """Run a jump according to the transport mode.
+
+        Cinema: only while paused, like the DCP-2000 itself. Mediaplayer:
+        pause, jump, play on (the server ignores jumps while it plays and
+        re-pauses when a jump completes, so we wait for it and keep it running).
+        `action` returns the frame it went to (or None if unknown).
+        """
+        async with self._jump_lock:  # one jump at a time, in click order
+            await self._jump_locked(action, resume)
         self.start_burst()
+
+    async def _jump_locked(self, action, resume: bool) -> None:
+        if self.data and self.data.starting:
+            raise TransportLockedError("playback is starting (pre-show checks)", "starting")
+        running = await self._is_running()
+        if running and self.transport_mode == MODE_CINEMA:
+            raise TransportLockedError("Cinema Mode: pause the server first", "cinema_locked")
+        if running:
+            if self.spl_loaded:
+                await self._klv_confirmed("PauseSPL", "paused")
+            else:
+                await self._pause_confirmed(tries=3)
+        target = await action()
+        if self.spl_loaded:
+            # SPL jumps complete ~2 s after the answer: wait, so the next step
+            # (e.g. another frame) starts from the new position.
+            if target is not None:
+                await self._wait_timecode_settled(target)
+            elif running and resume:
+                await asyncio.sleep(2.0)
+        if running and resume:
+            if self.spl_loaded:
+                await self._play_and_hold()
+            else:
+                await self.client.play()
+
+    @staticmethod
+    def _parse_timecode(timecode: str, fps: float) -> int:
+        rate = round(fps)
+        parts = [int(x) for x in timecode.replace(".", ":").replace(";", ":").split(":")]
+        if len(parts) == 3:  # HH:MM:SS
+            parts.append(0)
+        parts = [0] * (4 - len(parts)) + parts
+        h, m, s, f = parts[-4:]
+        if f >= rate:
+            raise DCPCommandError(f"frame {f} is out of range for {fps:g} fps")
+        return ((h * 60 + m) * 60 + s) * rate + f
+
+    async def async_seek(
+        self, timecode: str | None = None, position: float | None = None,
+        offset: float | None = None,
+    ) -> None:
+        """Jump inside the current clip/element: timecode, position (s) or offset (s)."""
+        fps = self.current_fps()
+        if timecode is None and position is None and offset is None:
+            raise DCPCommandError("timecode, position or offset required")
+
+        async def action():
+            if timecode:
+                frame = self._parse_timecode(timecode, fps)
+            elif position is not None:
+                frame = round(max(0.0, position) * fps)
+            else:
+                frame = await self._current_frame() + round(offset * fps)
+            return await self._goto_frame(frame)
+
+        await self._jump(action)
+
+    async def async_step_frames(self, frames: int) -> None:
+        """Step single frames; the server is left paused (also in Mediaplayer mode)."""
+
+        async def action():
+            return await self._goto_frame(await self._current_frame() + frames)
+
+        await self._jump(action, resume=False)
 
     async def async_skip_to_event(self, event_id: str | None = None, index: int | None = None) -> None:
         if self.klv is None:
@@ -636,35 +740,50 @@ class DCPCoordinator(DataUpdateCoordinator[DCPData]):
             if index is None or not 0 <= index < len(items):
                 raise DCPCommandError("unknown SPL event")
             event_id = items[index]["event_id"]
-        await self.klv.skip_to_event(event_id)
-        self.start_burst()
+
+        async def action():
+            await self.klv.skip_to_event(event_id)
+            return 0
+
+        await self._jump(action)
+
+    async def async_next(self) -> None:
+        if not self.spl_loaded:
+            raise DCPCommandError("no show playlist loaded")
+
+        async def action():
+            await self.klv.simple("SkipForward")
+            return 0
+
+        await self._jump(action)
+
+    async def async_skip_backward(self) -> None:
+        async def action():
+            await self.klv.simple("SkipBackward")
+            return 0
+
+        await self._jump(action)
+
+    async def async_jump_seconds(self, seconds: int) -> None:
+        """KLV JumpForward/Backward (firmware may use a fixed 3 min)."""
+
+        async def action():
+            await self.klv.jump(seconds)
+            return None
+
+        await self._jump(action)
 
     async def async_previous(self, threshold: float = PREVIOUS_THRESHOLD) -> None:
         """Back to the start of the current clip; already there -> previous clip."""
-        fps = self.current_fps()
-        try:
-            tc = await self.client.timecode_parts()
-        except DCPCommandError:
-            tc = None
-        position = p.timecode_to_frames(tc, fps) / fps if tc else 0.0
-        if self.spl_loaded:
-            if position > threshold:
-                # JumpToTimeCode is acknowledged but ignored while the show
-                # plays: pause, jump, play again.
-                playing = (await self.klv.status_spl()).state == "playing"
-                if playing:
-                    await self._klv_confirmed("PauseSPL", "paused")
-                await self.klv.jump_to_timecode("00:00:00.00")
-                if playing:
-                    # The jump completes ~2 s later and pauses the show again:
-                    # wait for it, then start and make sure it keeps running.
-                    await self._wait_timecode_settled(0)
-                    await self._play_and_hold()
-            else:
+        position = await self._current_frame() / self.current_fps()
+
+        async def action():
+            if self.spl_loaded and position <= threshold:
                 await self.klv.simple("SkipBackward")
-        else:
-            await self.client.locate(0)
-        self.start_burst()
+                return 0
+            return await self._goto_frame(0)
+
+        await self._jump(action)
 
     async def _wait_timecode_settled(self, frame: int, timeout: float = 4.0) -> None:
         """Wait until the 9-pin timecode shows `frame` on two reads in a row."""

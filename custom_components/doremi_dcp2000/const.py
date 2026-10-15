@@ -21,3 +21,7 @@ START_TIMEOUT = 90  # seconds the server may spend on security checks after Play
 BURST_SECONDS = 8  # fast polling after a transport command ...
 BURST_INTERVAL = 0.5  # ... every half second
 PREVIOUS_THRESHOLD = 3  # s into a clip: "previous" restarts it, below that -> previous clip
+
+MODE_CINEMA = "cinema"  # jumps only while paused - like the DCP-2000 itself
+MODE_MEDIAPLAYER = "mediaplayer"  # jumps also while playing (pause, jump, play)
+TRANSPORT_MODES = [MODE_CINEMA, MODE_MEDIAPLAYER]

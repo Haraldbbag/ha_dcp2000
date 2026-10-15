@@ -86,6 +86,13 @@
     "select": {
       "spl": {
         "default": "mdi:playlist-play"
+      },
+      "transport_mode": {
+        "default": "mdi:movie-cog",
+        "state": {
+          "cinema": "mdi:theater",
+          "mediaplayer": "mdi:play-box-multiple"
+        }
       }
     }
   },
@@ -143,6 +150,9 @@
     },
     "get_library": {
       "service": "mdi:filmstrip-box-multiple"
+    },
+    "step_frames": {
+      "service": "mdi:step-forward"
     }
   }
 }

@@ -216,6 +216,30 @@ seek:
           step: 0.01
           unit_of_measurement: s
           mode: box
+    offset:
+      example: -10
+      selector:
+        number:
+          min: -86400
+          max: 86400
+          step: 0.01
+          unit_of_measurement: s
+          mode: box
+
+step_frames:
+  target:
+    entity:
+      integration: doremi_dcp2000
+      domain: media_player
+  fields:
+    frames:
+      required: true
+      default: 1
+      selector:
+        number:
+          min: -1000
+          max: 1000
+          mode: box
 
 skip_to_event:
   target:

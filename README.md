@@ -73,15 +73,18 @@ Dashboard-Ressource ein (bei Ressourcen im YAML-Modus bitte
 ```yaml
 type: custom:doremi-dcp2000-card
 entity: media_player.kino_1
-# show_playlist: false   # Event-Liste rechts ausblenden
+show_playlist: true        # Event-Liste rechts (Standard: an)
+show_frame_buttons: false  # Knöpfe „Frame zurück/vor“ (Standard: aus)
+show_seek_buttons: false   # Knöpfe „−N s / +N s“ (Standard: aus)
+seek_seconds: 10           # Sprungweite der Sekunden-Knöpfe
 ```
 
 - Oben der aktuelle Clip (bzw. das aktuelle SPL-Element), darunter die ganze
   SPL: links Timecode / Länge, rechts Restzeit, Balken mit Prozent.
 - Rechts die Events der geladenen SPL mit Automation-Cues; das laufende ist markiert.
-- Knöpfe: zurück (zum Anfang des Clips; steht man schon in den ersten 3 s: vorheriger
-  Clip), Play/Pause, Auswerfen, nächster Clip. Nach jedem Befehl fragt die Integration
-  8 s lang alle 0,5 s den Status ab, damit die Anzeige sofort folgt.
+- Knöpfe: zurück (zum Anfang des Clips; in den ersten 3 s: vorheriger Clip),
+  optional −N s und Frame zurück, Play/Pause, optional Frame vor und +N s,
+  nächster Clip, Auswerfen. Links unten steht der Transportmodus.
 - **Auswerfen:** bei Wiedergabe mit Sicherheitsabfrage; bei Pause sofort;
   sonst öffnet sich der Ladedialog (Reiter CPL / SPL, Suche). Bei einer SPL
   werden vor dem Laden ihre Automation-Cues angezeigt. „Abspielen“ startet
@@ -89,9 +92,23 @@ entity: media_player.kino_1
   der DCP-2000 nicht ohne Start pausieren: Für „Pause“ schickt die Integration
   ein einzelnes `PlaySPL`, der Server macht seine Prüfungen (ca. 30–60 s,
   Anzeige „Startet …“) und parkt die Show pausiert am Anfang.
-- **Nur in Pause:** Klick auf ein Event springt dorthin (`SkipToEvent`),
-  der Clip-Balken lässt sich mit der Maus ziehen, ein Klick auf den Timecode
-  öffnet eine Eingabe (HH:MM:SS:FF).
+- **Springen:** Klick auf ein Event, Clip-Balken ziehen, Klick auf den
+  Timecode (Eingabe HH:MM:SS:FF), vor/zurück, Frame- und Sekunden-Knöpfe.
+
+### Transportmodus
+
+Pro Server gibt es die Auswahl **Transportmodus** (`select.<name>_transportmodus`),
+umschaltbar in der Geräteseite oder per Skript (`select.select_option`); der
+Media Player zeigt ihn im Attribut `transport_mode`. Der Modus gilt in der
+Integration selbst, also auch für Skripte und Automationen.
+
+| Modus | Sprünge während der Wiedergabe |
+|-------|-------------------------------|
+| **Cinema** (Standard) | gesperrt – erst pausieren, wie am Doremi selbst |
+| **Mediaplayer** (QC-Sichtungen) | erlaubt: die Integration pausiert, springt und spielt weiter; Frame-Schritte bleiben in Pause |
+
+Nach jedem Befehl fragt die Integration 8 s lang alle 0,5 s den Status ab,
+damit die Anzeige sofort folgt.
 
 ## Aktionen (Dienste)
 
@@ -129,7 +146,8 @@ response_variable: inhalte
 ```
 
 Für die Karte und Automationen: `load_content` (CPL/SPL laden, `start: play|pause`),
-`seek` (Timecode oder Sekunden; bei SPL per `JumpToTimeCode`), `skip_to_event`,
+`seek` (Timecode, Position oder relativer `offset` in Sekunden; bei SPL per
+`JumpToTimeCode`), `step_frames` (±N Frames), `skip_to_event`,
 `eject`, `get_library` (alle CPLs/SPLs mit Titeln).
 
 Weitere: `set_frame`, `step_back`, `set_gpo` (ganzes Byte), sowie mit KLV

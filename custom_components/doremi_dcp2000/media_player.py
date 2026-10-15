@@ -22,7 +22,8 @@ import logging
 
 from . import protocol as p
 from .client import DCPError
-from .coordinator import DCPConfigEntry, DCPCoordinator
+from .const import DOMAIN
+from .coordinator import DCPConfigEntry, DCPCoordinator, TransportLockedError
 from .entity import DCPEntity
 
 _LOGGER = logging.getLogger(__name__)
@@ -119,8 +120,14 @@ async def async_setup_entry(
         {
             vol.Exclusive("timecode", "pos"): cv.string,
             vol.Exclusive("position", "pos"): vol.All(vol.Coerce(float), vol.Range(min=0)),
+            vol.Exclusive("offset", "pos"): vol.Coerce(float),
         },
         "async_seek",
+    )
+    platform.async_register_entity_service(
+        "step_frames",
+        {vol.Required("frames"): vol.All(vol.Coerce(int), vol.Range(min=-1000, max=1000))},
+        "async_step_frames",
     )
     platform.async_register_entity_service(
         "skip_to_event",
@@ -165,6 +172,10 @@ class DCPMediaPlayer(DCPEntity, MediaPlayerEntity):
     async def _run(self, coro: Awaitable[Any], refresh: bool = True) -> Any:
         try:
             result = await coro
+        except TransportLockedError as err:
+            raise ServiceValidationError(
+                str(err), translation_domain=DOMAIN, translation_key=err.key
+            ) from err
         except DCPError as err:
             raise HomeAssistantError(f"DCP-2000: {err}") from err
         if refresh:
@@ -277,6 +288,7 @@ class DCPMediaPlayer(DCPEntity, MediaPlayerEntity):
                 ] if d.spl.spl_uuid else [],
             }
         attrs["edit_rate"] = self.coordinator.current_fps()
+        attrs["transport_mode"] = self.coordinator.transport_mode
         attrs["mode"] = (
             "spl" if self.coordinator.spl_loaded else "clip" if d.clip_id else "empty"
         )
@@ -302,6 +314,9 @@ class DCPMediaPlayer(DCPEntity, MediaPlayerEntity):
     async def async_media_seek(self, position: float) -> None:
         await self._run(self.coordinator.async_seek(position=position), refresh=False)
 
+    async def async_step_frames(self, frames: int) -> None:
+        await self._run(self.coordinator.async_step_frames(frames), refresh=False)
+
     async def async_select_source(self, source: str) -> None:
         await self.async_cue_clip(source)
 
@@ -309,7 +324,8 @@ class DCPMediaPlayer(DCPEntity, MediaPlayerEntity):
         await self.async_cue_clip(media_id, autoplay=True)
 
     async def async_media_next_track(self) -> None:
-        await self._run(self._require_klv().simple("SkipForward"))
+        self._require_klv()
+        await self._run(self.coordinator.async_next(), refresh=False)
 
     async def async_media_previous_track(self) -> None:
         await self._run(self.coordinator.async_previous(), refresh=False)
@@ -345,7 +361,7 @@ class DCPMediaPlayer(DCPEntity, MediaPlayerEntity):
         return {"clip_id": self.coordinator.data.clip_name, "frame_rate": rate}
 
     async def async_step_back(self) -> None:
-        await self._run(self.coordinator.client.step_back())
+        await self._run(self.coordinator.async_step_frames(-1), refresh=False)
 
     async def async_projector_channel(self, channel: int) -> None:
         await self._run(self.coordinator.client.projector(p.PROJ_CHANNEL, channel), refresh=False)
@@ -405,8 +421,8 @@ class DCPMediaPlayer(DCPEntity, MediaPlayerEntity):
             "play": lambda: self._spl_play(klv),
             "pause": lambda: klv.simple("PauseSPL"),
             "eject": lambda: klv.simple("EjectSPL"),
-            "skip_forward": lambda: klv.simple("SkipForward"),
-            "skip_backward": lambda: klv.simple("SkipBackward"),
+            "skip_forward": self.coordinator.async_next,
+            "skip_backward": self.coordinator.async_skip_backward,
             "loop_on": lambda: klv.loop_mode(1),
             "loop_off": lambda: klv.loop_mode(0),
         }
@@ -416,17 +432,21 @@ class DCPMediaPlayer(DCPEntity, MediaPlayerEntity):
         return await self.coordinator.async_spl_play()
 
     async def async_spl_jump(self, seconds: int) -> None:
-        await self._run(self._require_klv().jump(seconds))
+        self._require_klv()
+        await self._run(self.coordinator.async_jump_seconds(seconds), refresh=False)
 
     async def async_load_content(self, kind: str, id: str, start: str = "pause") -> None:
         if kind == "spl":
             self._require_klv()
         await self._run(self.coordinator.async_load_content(kind, id, start), refresh=False)
 
-    async def async_seek(self, timecode: str | None = None, position: float | None = None) -> None:
-        if timecode is None and position is None:
-            raise ServiceValidationError("Provide timecode or position.")
-        await self._run(self.coordinator.async_seek(timecode, position), refresh=False)
+    async def async_seek(
+        self, timecode: str | None = None, position: float | None = None,
+        offset: float | None = None,
+    ) -> None:
+        if timecode is None and position is None and offset is None:
+            raise ServiceValidationError("Provide timecode, position or offset.")
+        await self._run(self.coordinator.async_seek(timecode, position, offset), refresh=False)
 
     async def async_skip_to_event(self, event_id: str | None = None, index: int | None = None) -> None:
         self._require_klv()

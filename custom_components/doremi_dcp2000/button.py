@@ -46,7 +46,7 @@ BUTTONS: tuple[DCPButtonDescription, ...] = (
     ),
     DCPButtonDescription(
         key="step_back", translation_key="step_back",
-        press_fn=lambda c: c.client.step_back(),
+        press_fn=lambda c: c.async_step_frames(-1),
     ),
     DCPButtonDescription(
         key="measure_fps", translation_key="measure_fps",

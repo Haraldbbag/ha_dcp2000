@@ -4,8 +4,12 @@
  *
  *   type: custom:doremi-dcp2000-card
  *   entity: media_player.dcp_2000
+ *   show_playlist: true        # event list on the right
+ *   show_frame_buttons: false  # one frame back / forward
+ *   show_seek_buttons: false   # jump back / forward by seek_seconds
+ *   seek_seconds: 10
  */
-const CARD_VERSION = "0.7.8";
+const CARD_VERSION = "0.8.0";
 
 const TEXT = {
   de: {
@@ -21,6 +25,11 @@ const TEXT = {
     gotoTc: "Zu Timecode springen", tcHint: "Format HH:MM:SS:FF", ok: "Springen",
     badTc: "Ungültiger Timecode", onlyPause: "Nur in Pause möglich",
     ejectLoaded: "Geladenes auswerfen", events: "Events",
+    frameBack: "Ein Frame zurück", frameFwd: "Ein Frame vor",
+    seekBack: "{n} s zurück", seekFwd: "{n} s vor",
+    cinema: "Cinema", mediaplayer: "Mediaplayer",
+    modeHint: "Transportmodus – umschaltbar über die Auswahl-Entität bzw. per Skript",
+    onlyPauseCinema: "Cinema Mode: nur in Pause möglich",
   },
   en: {
     playing: "Playing", paused: "Pause", starting: "Starting …", cued: "Loaded",
@@ -35,6 +44,11 @@ const TEXT = {
     gotoTc: "Go to timecode", tcHint: "Format HH:MM:SS:FF", ok: "Go",
     badTc: "Invalid timecode", onlyPause: "Only while paused",
     ejectLoaded: "Eject loaded content", events: "events",
+    frameBack: "One frame back", frameFwd: "One frame forward",
+    seekBack: "{n} s back", seekFwd: "{n} s forward",
+    cinema: "Cinema", mediaplayer: "Mediaplayer",
+    modeHint: "Transport mode – switch it with the select entity or a script",
+    onlyPauseCinema: "Cinema mode: only while paused",
   },
 };
 
@@ -44,6 +58,10 @@ const ICONS = {
   play: "M8,5.14V19.14L19,12.14L8,5.14Z",
   pause: "M14,19H18V5H14M6,19H10V5H6V19Z",
   eject: "M12,5L5.33,15H18.67M5,17H19V19H5V17Z",
+  frameBack: "M19,5V19H16V5M14,5V19L3,12",
+  frameFwd: "M5,5V19H8V5M10,5V19L21,12",
+  cinema: "M4,15H6A2,2 0 0,0 8,17H16A2,2 0 0,0 18,15H20V7A2,2 0 0,0 18,5H6A2,2 0 0,0 4,7V15M2,19V17H22V19H2Z",
+  mediaplayer: "M10,16.5V7.5L16,12M20,4.4C19.4,4.2 15.7,4 12,4C8.3,4 4.6,4.19 4,4.38C2.44,4.9 2,8.4 2,12C2,15.59 2.44,19.1 4,19.61C4.6,19.81 8.3,20 12,20C15.7,20 19.4,19.81 20,19.61C21.56,19.1 22,15.59 22,12C22,8.4 21.56,4.91 20,4.4Z",
 };
 
 const hms = (s) => {
@@ -114,8 +132,24 @@ ha-card { padding:16px; overflow:hidden; }
 .cue::before { content:"⚙ "; opacity:0.6; }
 .list.clickable .ev, .list.clickable .cue { cursor:pointer; }
 .list.clickable .ev:hover { outline:2px solid var(--primary-color); outline-offset:-2px; }
-.buttons { display:flex; justify-content:center; gap:12px; margin-top:14px; padding-top:12px;
-  border-top:1px solid var(--divider-color,#ddd); }
+.buttons { display:grid; grid-template-columns:1fr auto 1fr; align-items:center; gap:12px;
+  margin-top:14px; padding-top:12px; border-top:1px solid var(--divider-color,#ddd); }
+.btnrow { display:flex; justify-content:center; gap:10px; flex-wrap:wrap; }
+.btnrow .sep { width:10px; }
+.mode { justify-self:start; display:inline-flex; align-items:center; gap:6px; font-size:0.8em;
+  color:var(--secondary-text-color); white-space:nowrap; }
+.mode svg { width:18px; height:18px; fill:currentColor; }
+.mode.mediaplayer { color:var(--warning-color,#ff9800); font-weight:600; }
+button.ctl .txt { font-size:0.85em; font-weight:700; color:var(--primary-color,#03a9f4); }
+@container (max-width: 560px) {
+  .buttons { grid-template-columns:1fr; }
+  .mode { order:2; }
+  .btnrow { gap:4px; }
+  .btnrow .sep { width:4px; }
+  .btnrow button.ctl { width:40px; height:40px; border-radius:8px; }
+  .btnrow button.ctl svg { width:24px; height:24px; }
+  .btnrow button.ctl .txt { font-size:0.75em; }
+}
 button.ctl { width:56px; height:44px; border-radius:10px; border:1px solid var(--divider-color,#ccc);
   background:var(--secondary-background-color,#f3f3f3); cursor:pointer; display:flex;
   align-items:center; justify-content:center; padding:0; }
@@ -176,7 +210,12 @@ class DoremiDcp2000Card extends HTMLElement {
     if (!config.entity || !config.entity.startsWith("media_player.")) {
       throw new Error("entity (media_player of the DCP-2000) is required");
     }
-    this._config = { show_playlist: true, ...config };
+    this._config = {
+      show_playlist: true, show_frame_buttons: false, show_seek_buttons: false, seek_seconds: 10,
+      ...config,
+    };
+    const n = Number(this._config.seek_seconds);
+    this._config.seek_seconds = n > 0 ? n : 10;
     this._built = false;
   }
 
@@ -204,6 +243,7 @@ class DoremiDcp2000Card extends HTMLElement {
   // ---------------------------------------------------------------- build
   _build() {
     const t = this._t;
+    const n = this._config.seek_seconds;
     const root = this.shadowRoot || this.attachShadow({ mode: "open" });
     root.innerHTML = `
       <style>${STYLE}</style>
@@ -224,10 +264,23 @@ class DoremiDcp2000Card extends HTMLElement {
           ${this._config.show_playlist ? `<div class="list" id="list"></div>` : ""}
         </div>
         <div class="buttons">
-          <button class="ctl" id="prev" title="${t.prev}">${svg(ICONS.prev)}</button>
-          <button class="ctl" id="playpause"></button>
-          <button class="ctl" id="eject" title="${t.ejectLoad}">${svg(ICONS.eject)}</button>
-          <button class="ctl" id="next" title="${t.next}">${svg(ICONS.next)}</button>
+          <span class="mode" id="mode" title="${t.modeHint}"></span>
+          <div class="btnrow">
+            <button class="ctl jump" id="prev" title="${t.prev}">${svg(ICONS.prev)}</button>
+            ${this._config.show_seek_buttons ? `<button class="ctl jump" id="seekBack"
+              title="${t.seekBack.replace("{n}", n)}"><span class="txt">−${n}s</span></button>` : ""}
+            ${this._config.show_frame_buttons ? `<button class="ctl jump" id="frameBack"
+              title="${t.frameBack}">${svg(ICONS.frameBack)}</button>` : ""}
+            <button class="ctl" id="playpause"></button>
+            ${this._config.show_frame_buttons ? `<button class="ctl jump" id="frameFwd"
+              title="${t.frameFwd}">${svg(ICONS.frameFwd)}</button>` : ""}
+            ${this._config.show_seek_buttons ? `<button class="ctl jump" id="seekFwd"
+              title="${t.seekFwd.replace("{n}", n)}"><span class="txt">+${n}s</span></button>` : ""}
+            <button class="ctl jump" id="next" title="${t.next}">${svg(ICONS.next)}</button>
+            <span class="sep"></span>
+            <button class="ctl" id="eject" title="${t.ejectLoad}">${svg(ICONS.eject)}</button>
+          </div>
+          <span></span>
         </div>
         <div class="error" id="error"></div>
       </div></ha-card>
@@ -240,12 +293,16 @@ class DoremiDcp2000Card extends HTMLElement {
     $("next").addEventListener("click", () => this._call("media_player", "media_next_track"));
     $("playpause").addEventListener("click", () => this._playPause());
     $("eject").addEventListener("click", () => this._eject());
-    $("clipTc").addEventListener("click", () => this._paused && this._openTcDialog());
+    $("clipTc").addEventListener("click", () => this._canJump && this._openTcDialog());
     this._setupSeek($("clipBar"));
     $("list")?.addEventListener("click", (ev) => {
       const row = ev.target.closest("[data-idx]");
-      if (row && this._paused) this._skipTo(Number(row.dataset.idx));
+      if (row && this._canJump) this._skipTo(Number(row.dataset.idx));
     });
+    $("frameBack")?.addEventListener("click", () => this._call("doremi_dcp2000", "step_frames", { frames: -1 }));
+    $("frameFwd")?.addEventListener("click", () => this._call("doremi_dcp2000", "step_frames", { frames: 1 }));
+    $("seekBack")?.addEventListener("click", () => this._call("doremi_dcp2000", "seek", { offset: -n }));
+    $("seekFwd")?.addEventListener("click", () => this._call("doremi_dcp2000", "seek", { offset: n }));
   }
 
   // --------------------------------------------------------------- state
@@ -277,6 +334,16 @@ class DoremiDcp2000Card extends HTMLElement {
 
   get _paused() { return this._snap?.transport === "paused"; }
 
+  get _mediaplayer() { return this._snap?.a.transport_mode === "mediaplayer"; }
+
+  /** Jumps allowed? Cinema: not while playing (like the server). Mediaplayer: anytime. */
+  get _canJump() {
+    const s = this._snap;
+    if (!s || s.a.mode === "empty") return false;
+    if (["off", "starting", "cueing", "ejected"].includes(s.transport)) return false;
+    return !s.playing || this._mediaplayer;
+  }
+
   _update() {
     if (!this._built) return;
     const s = (this._snap = this._snapshot());
@@ -303,17 +370,28 @@ class DoremiDcp2000Card extends HTMLElement {
     pp.title = showPause ? t.pause : t.play;
     pp.classList.toggle("busy", !!this._pending);
     pp.disabled = s.transport === "off" || s.a.mode === "empty";
-    $("prev").disabled = s.a.mode === "empty" || s.transport === "off";
-    $("next").disabled = !s.splLoaded || s.idx == null || s.idx >= s.items.length - 1;
+    const can = this._canJump;
+    const lockTitle = s.playing && !this._mediaplayer ? t.onlyPauseCinema : "";
+    for (const id of ["prev", "next", "frameBack", "frameFwd", "seekBack", "seekFwd"]) {
+      const b = $(id);
+      if (!b) continue;
+      b.disabled = !can;
+      b.dataset.lock = lockTitle;
+    }
+    if (can) $("next").disabled = !s.splLoaded || s.idx == null || s.idx >= s.items.length - 1;
+    const mode = this._mediaplayer ? "mediaplayer" : "cinema";
+    $("mode").className = `mode ${mode}`;
+    $("mode").innerHTML = `${svg(ICONS[mode])}<span>${t[mode]}</span>`;
     $("eject").title = s.playing || s.transport === "paused" ? t.eject : t.ejectLoad;
     $("eject").disabled = s.transport === "off";
-    $("clipTc").classList.toggle("clickable", this._paused);
-    $("clipTc").title = this._paused ? t.gotoTc : "";
-    $("clipBar").classList.toggle("seekable", this._paused && s.clipDur > 0);
+    $("clipTc").classList.toggle("clickable", can);
+    $("clipTc").title = can ? t.gotoTc : lockTitle;
+    $("clipBar").classList.toggle("seekable", can && s.clipDur > 0);
+    $("clipBar").title = can ? "" : lockTitle;
     const list = $("list");
     if (list) {
-      list.classList.toggle("clickable", this._paused);
-      list.title = this._paused ? "" : t.onlyPause;
+      list.classList.toggle("clickable", can);
+      list.title = can ? "" : (lockTitle || t.onlyPause);
       this._renderList(s);
     }
     this._tick();
@@ -418,7 +496,7 @@ class DoremiDcp2000Card extends HTMLElement {
       return frac * (this._snap?.clipDur || 0);
     };
     bar.addEventListener("pointerdown", (ev) => {
-      if (!this._paused || !(this._snap?.clipDur > 0)) return;
+      if (!this._canJump || !(this._snap?.clipDur > 0)) return;
       bar.setPointerCapture(ev.pointerId);
       this._dragPos = posAt(ev);
       this._tick();

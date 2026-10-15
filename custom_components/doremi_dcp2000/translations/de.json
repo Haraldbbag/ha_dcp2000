@@ -177,6 +177,13 @@
     "select": {
       "spl": {
         "name": "Show-Playlist"
+      },
+      "transport_mode": {
+        "name": "Transportmodus",
+        "state": {
+          "cinema": "Cinema",
+          "mediaplayer": "Mediaplayer"
+        }
       }
     }
   },
@@ -358,7 +365,7 @@
     },
     "seek": {
       "name": "Springen",
-      "description": "Springt im aktuellen Clip / SPL-Element (SPL: JumpToTimeCode).",
+      "description": "Springt im aktuellen Clip / SPL-Element. Cinema Mode: nur in Pause; Mediaplayer Mode: auch während der Wiedergabe (pausieren, springen, weiterspielen).",
       "fields": {
         "timecode": {
           "name": "Timecode",
@@ -367,6 +374,10 @@
         "position": {
           "name": "Position",
           "description": "Sekunden ab Clip-Anfang."
+        },
+        "offset": {
+          "name": "Versatz",
+          "description": "Sekunden relativ zur aktuellen Position (negativ = zurück)."
         }
       }
     },
@@ -391,6 +402,24 @@
     "get_library": {
       "name": "Bibliothek",
       "description": "Liefert alle CPLs und SPLs mit Titeln für Auswahldialoge."
+    },
+    "step_frames": {
+      "name": "Frames schalten",
+      "description": "Schaltet einzelne Frames vor/zurück (negativ). Der Server bleibt in Pause.",
+      "fields": {
+        "frames": {
+          "name": "Frames",
+          "description": "Positiv = vorwärts."
+        }
+      }
+    }
+  },
+  "exceptions": {
+    "cinema_locked": {
+      "message": "Cinema Mode: Server zuerst pausieren (oder den Transportmodus auf Mediaplayer stellen)."
+    },
+    "starting": {
+      "message": "Die Wiedergabe startet gerade (Sicherheitsprüfungen) – bitte erneut versuchen, sobald sie läuft."
     }
   }
 }

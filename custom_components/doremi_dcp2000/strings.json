@@ -177,6 +177,13 @@
     "select": {
       "spl": {
         "name": "Show playlist"
+      },
+      "transport_mode": {
+        "name": "Transport mode",
+        "state": {
+          "cinema": "Cinema",
+          "mediaplayer": "Mediaplayer"
+        }
       }
     }
   },
@@ -358,7 +365,7 @@
     },
     "seek": {
       "name": "Seek",
-      "description": "Jumps inside the current clip / SPL element (SPL: JumpToTimeCode).",
+      "description": "Jumps inside the current clip / SPL element. Cinema mode: only while paused; Mediaplayer mode: also while playing (pause, jump, play).",
       "fields": {
         "timecode": {
           "name": "Timecode",
@@ -367,6 +374,10 @@
         "position": {
           "name": "Position",
           "description": "Seconds from the start of the clip."
+        },
+        "offset": {
+          "name": "Offset",
+          "description": "Seconds relative to the current position (negative = back)."
         }
       }
     },
@@ -391,6 +402,24 @@
     "get_library": {
       "name": "Library",
       "description": "Returns all CPLs and SPLs with titles for selection dialogs."
+    },
+    "step_frames": {
+      "name": "Step frames",
+      "description": "Steps single frames forward/back (negative). The server stays paused.",
+      "fields": {
+        "frames": {
+          "name": "Frames",
+          "description": "Positive = forward."
+        }
+      }
+    }
+  },
+  "exceptions": {
+    "cinema_locked": {
+      "message": "Cinema mode: pause the server first (or switch the transport mode to Mediaplayer)."
+    },
+    "starting": {
+      "message": "Playback is starting (pre-show checks) - try again when it runs."
     }
   }
 }
