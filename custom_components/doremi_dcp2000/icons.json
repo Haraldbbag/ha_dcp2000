@@ -88,10 +88,10 @@
         "default": "mdi:playlist-play"
       },
       "transport_mode": {
-        "default": "mdi:movie-cog",
+        "default": "mdi:lock",
         "state": {
-          "cinema": "mdi:theater",
-          "mediaplayer": "mdi:play-box-multiple"
+          "cinema": "mdi:lock",
+          "mediaplayer": "mdi:lock-open-variant"
         }
       }
     }
