@@ -25,6 +25,7 @@ from .const import (
     DOMAIN,
     BURST_INTERVAL,
     BURST_SECONDS,
+    CPL_INFO_BATCH,
     LIBRARY_REFRESH,
     MODE_CINEMA,
     PREVIOUS_THRESHOLD,
@@ -58,6 +59,8 @@ class DCPData:
     gpi: int | None = None
     spl: p.SplStatus | None = None
     clips: dict[str, bytes] = field(default_factory=dict)
+    # CPLs the 9-pin clip list does not show (IMS3000): label -> CPL UUID
+    cpls: dict[str, str] = field(default_factory=dict)
     spls: dict[str, str] = field(default_factory=dict)  # label -> SPL UUID
     spl_items: list[dict] = field(default_factory=list)  # events of the loaded SPL
     spl_index: int | None = None  # index of the current event in spl_items
@@ -148,16 +151,19 @@ class DCPCoordinator(DataUpdateCoordinator[DCPData]):
         self._store: Store[dict] = Store(hass, 1, f"{DOMAIN}.{entry.entry_id}")
         self._cache: dict[str, dict] = {}
         self._spl_cache: dict[str, dict] = {}  # uuid -> {title, frames}
+        self._cpl_cache: dict[str, dict] = {}  # uuid -> {title, kind, frames, rate}
         self.data = DCPData(fps=self.default_fps)
 
     async def async_load_cache(self) -> None:
         stored = await self._store.async_load() or {}
         self._cache = stored.get("clips", {})
         self._spl_cache = stored.get("spls", {})
+        self._cpl_cache = stored.get("cpls", {})
 
     def _save(self) -> None:
         self._store.async_delay_save(
-            lambda: {"clips": self._cache, "spls": self._spl_cache}, 10
+            lambda: {"clips": self._cache, "spls": self._spl_cache, "cpls": self._cpl_cache},
+            10,
         )
 
     def _remember(self, clip: bytes, **values) -> None:
@@ -275,15 +281,115 @@ class DCPCoordinator(DataUpdateCoordinator[DCPData]):
         except DCPCommandError as err:
             _LOGGER.debug("Listing clips failed: %s", err)
             clips = []
+        cpl_uuids: list[str] | None = None
         if self.klv:
-            await self._enrich_from_klv(clips)
+            try:
+                cpl_uuids = await self.klv.get_cpl_list()
+            except DCPError as err:
+                _LOGGER.debug("GetCPLList failed: %s", err)
+            await self._enrich_from_klv(clips, cpl_uuids)
             await self._refresh_spls(data)
         names: dict[str, bytes] = {}
         for clip in clips:
             title = await self._clip_title(clip)
             names[clip_label(clip, title)] = clip
         data.clips = names
-        self._library_at = time.monotonic()
+        complete = True
+        if cpl_uuids is not None:
+            complete = await self._refresh_cpls(data, clips, cpl_uuids)
+        # Titles still missing (large library): continue on the next update.
+        self._library_at = time.monotonic() if complete else 0.0
+
+    async def _refresh_cpls(
+        self, data: DCPData, clips: list[bytes], uuids: list[str]
+    ) -> bool:
+        """CPLs that have no 9-pin clip id get their own entries (IMS3000).
+
+        Titles come from GetCPLInfo and are cached; at most CPL_INFO_BATCH new
+        ones per update so status polling is not held up. Returns True when
+        every CPL has its details.
+        """
+        clip_ids = {p.clip_id_to_str(c).lower() for c in clips}
+        orphans = [u for u in uuids if u.replace("-", "")[:8].lower() not in clip_ids]
+        changed = False
+        fetched = 0
+        complete = True
+        for uuid in orphans:
+            if uuid in self._cpl_cache:
+                continue
+            if fetched >= CPL_INFO_BATCH:
+                complete = False
+                break
+            fetched += 1
+            try:
+                info = await self.klv.get_cpl(uuid)
+            except (DCPError, ValueError) as err:
+                _LOGGER.debug("GetCPLInfo %s failed: %s", uuid, err)
+                continue
+            self._cpl_cache[uuid] = {
+                "title": info.title or uuid,
+                "kind": info.kind,
+                "frames": info.duration,
+                "rate": list(info.edit_rate),
+                "encrypted": info.encrypted,
+            }
+            changed = True
+        for gone in set(self._cpl_cache) - set(uuids):
+            del self._cpl_cache[gone]
+            changed = True
+        if changed:
+            self._save()
+        labels: dict[str, str] = {}
+        for uuid in orphans:
+            title = self._cpl_cache.get(uuid, {}).get("title") or uuid
+            labels[f"{title} ({uuid.replace('-', '')[:8]})"] = uuid
+        data.cpls = labels
+        return complete
+
+    def cpl_for_name(self, name: str) -> str | None:
+        """UUID of a CPL without clip id, by label, title, UUID or 8-digit id."""
+        cpls = self.data.cpls if self.data else {}
+        if name in cpls:
+            return cpls[name]
+        key = name.lower().removeprefix("urn:uuid:")
+        for uuid in cpls.values():
+            if key in (uuid, uuid.replace("-", "")[:8]):
+                return uuid
+            if self._cpl_cache.get(uuid, {}).get("title") == name:
+                return uuid
+        return None
+
+    async def async_load_cpl(self, cpl_uuid: str, start: str = "pause") -> None:
+        """Play a CPL through a generated one-event SPL (not stored on the server)."""
+        if self.klv is None:
+            raise DCPCommandError("KLV API not enabled")
+        info = self._cpl_cache.get(cpl_uuid)
+        if not info or not info.get("frames"):
+            cpl = await self.klv.get_cpl(cpl_uuid)
+            info = {
+                "title": cpl.title or cpl_uuid, "kind": cpl.kind, "frames": cpl.duration,
+                "rate": list(cpl.edit_rate), "encrypted": cpl.encrypted,
+            }
+            self._cpl_cache[cpl_uuid] = info
+            self._save()
+        _, xml = p.build_cpl_spl_xml(
+            cpl_uuid, info["title"], info["frames"], tuple(info.get("rate") or (24, 1))
+        )
+        if self.spl_loaded:
+            await self.klv.simple("EjectSPL")
+        self.remember_spl_xml(xml)
+        await self.klv.load_spl(xml)
+        self._spl_items_uuid = None
+        await self.async_spl_play(autoplay=start == "play")
+
+    def cpl_label_for_spl(self, spl_uuid: str | None) -> str | None:
+        """Source label when the loaded SPL is one generated for a CPL."""
+        if not spl_uuid or not self.data:
+            return None
+        for label, uuid in self.data.cpls.items():
+            if p.cpl_spl_uuid(uuid) == spl_uuid.lower():
+                return label
+        return None
 
     async def _refresh_spls(self, data: DCPData) -> None:
         """Show playlists with their titles (GetSPLList + GetSPLInfo, cached)."""
@@ -349,7 +455,9 @@ class DCPCoordinator(DataUpdateCoordinator[DCPData]):
                 return label
         return self._spl_cache.get(uuid, {}).get("title") or uuid
 
-    async def _enrich_from_klv(self, clips: list[bytes]) -> None:
+    async def _enrich_from_klv(
+        self, clips: list[bytes], cpl_uuids: list[str] | None = None
+    ) -> None:
         """Exact edit rate, title and kind for every CPL via GetCPLInfo."""
         missing = [
             c for c in clips
@@ -357,11 +465,9 @@ class DCPCoordinator(DataUpdateCoordinator[DCPData]):
         ]
         if not missing:
             return
-        try:
-            by_prefix = {u.replace("-", "")[:8]: u for u in await self.klv.get_cpl_list()}
-        except DCPError as err:
-            _LOGGER.debug("GetCPLList failed: %s", err)
+        if cpl_uuids is None:
             return
+        by_prefix = {u.replace("-", "")[:8]: u for u in cpl_uuids}
         for clip in missing:
             uuid = by_prefix.get(p.clip_id_to_str(clip).lower())
             if not uuid and self._ext_supported:
@@ -518,7 +624,11 @@ class DCPCoordinator(DataUpdateCoordinator[DCPData]):
             cpl = item.get("cpl_uuid")
             if cpl:
                 cached = self._cache.get(cpl.replace("-", "")[:8], {})
-                item["title"] = cached.get("title") or item["title"]
+                item["title"] = (
+                    cached.get("title")
+                    or self._cpl_cache.get(cpl, {}).get("title")
+                    or item["title"]
+                )
         return items
 
     def _check_spl_autoplay(self, data: DCPData) -> None:
@@ -589,6 +699,10 @@ class DCPCoordinator(DataUpdateCoordinator[DCPData]):
             # runs the pre-show checks and parks the show paused on its first
             # frame - exactly "pause"; only "play" sends the second PlaySPL.
             await self.async_spl_play(autoplay=start == "play")
+            return
+        cpl = self.cpl_for_name(ident)
+        if cpl:
+            await self.async_load_cpl(cpl, start)
             return
         raw = self.clip_by_name(ident)
         if self.spl_loaded:
@@ -850,6 +964,18 @@ class DCPCoordinator(DataUpdateCoordinator[DCPData]):
                 "kind": cached.get("kind"),
                 "fps": fps,
                 "duration": round(frames / fps) if frames and fps and frames < 2**30 else None,
+            })
+        for label, uuid in (self.data.cpls if self.data else {}).items():
+            info = self._cpl_cache.get(uuid, {})
+            rate = info.get("rate") or [0, 1]
+            fps = rate[0] / rate[1] if rate[0] and rate[1] else None
+            frames = info.get("frames")
+            cpls.append({
+                "id": uuid,
+                "title": info.get("title") or uuid,
+                "kind": info.get("kind"),
+                "fps": round(fps, 3) if fps else None,
+                "duration": round(frames / fps) if frames and fps else None,
             })
         cpls.sort(key=lambda c: c["title"].lower())
         spls = []

@@ -237,11 +237,14 @@ class DCPMediaPlayer(DCPEntity, MediaPlayerEntity):
 
     @property
     def source(self) -> str | None:
-        return self.coordinator.label_for(self.coordinator.data.clip_id)
+        d = self.coordinator.data
+        cpl = self.coordinator.cpl_label_for_spl(d.spl.spl_uuid if d.spl else None)
+        return cpl or self.coordinator.label_for(d.clip_id)
 
     @property
     def source_list(self) -> list[str]:
-        return sorted(self.coordinator.data.clips)
+        d = self.coordinator.data
+        return sorted([*d.clips, *d.cpls], key=str.lower)
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -334,6 +337,17 @@ class DCPMediaPlayer(DCPEntity, MediaPlayerEntity):
 
     async def async_cue_clip(self, clip: str, start_frame: int = 0, autoplay: bool = False) -> None:
         client = self.coordinator.client
+        cpl = self.coordinator.cpl_for_name(clip)
+        if cpl:  # no 9-pin clip id (IMS3000): play it as a one-event SPL
+            if start_frame:
+                raise ServiceValidationError(
+                    "start_frame is not supported for CPLs without a clip id; use seek."
+                )
+            await self._run(
+                self.coordinator.async_load_cpl(cpl, "play" if autoplay else "pause"),
+                refresh=False,
+            )
+            return
         raw = self.coordinator.clip_by_name(clip)
 
         async def _do():

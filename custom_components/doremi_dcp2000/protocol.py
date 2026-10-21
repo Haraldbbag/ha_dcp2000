@@ -618,6 +618,70 @@ def parse_spl_xml(xml: str) -> list[dict]:
     return items
 
 
+CPL_SPL_NAMESPACE = uuidlib.UUID("5d1c7b8e-1d4a-4c39-9a51-6f2f0d3e2b10")
+
+
+def cpl_spl_uuid(cpl_uuid: str) -> str:
+    """Stable UUID of the one-event SPL generated for a CPL."""
+    return str(uuidlib.uuid5(CPL_SPL_NAMESPACE, cpl_uuid.lower()))
+
+
+def build_cpl_spl_xml(
+    cpl_uuid: str, title: str, frames: int, edit_rate: tuple[int, int]
+) -> tuple[str, str]:
+    """A show playlist with a single CPL and no automation cues.
+
+    Servers whose 9-pin clip list does not contain a CPL (IMS3000) can still
+    play it through LoadSPL. Returns (spl_uuid, xml).
+    """
+    from xml.sax.saxutils import escape
+
+    cpl = cpl_uuid.lower()
+    spl = cpl_spl_uuid(cpl)
+
+    def sub(name: str) -> str:
+        return str(uuidlib.uuid5(CPL_SPL_NAMESPACE, f"{cpl}/{name}"))
+
+    rate_a, rate_b = edit_rate if edit_rate and edit_rate[0] else (24, 1)
+    title = escape(title or cpl)
+    xml = f"""<?xml version="1.0" encoding="UTF-8"?>
+<ShowPlaylist xmlns:spl="http://doremilabs.com/schemas/1.0/SPL"
+              xmlns:ds="http://www.w3.org/2000/09/xmldsig#">
+\t<Id>urn:uuid:{spl}</Id>
+\t<ShowTitleText>{title}</ShowTitleText>
+\t<AnnotationText>{title}</AnnotationText>
+\t<IssueDate>2026-01-01T00:00:00Z</IssueDate>
+\t<Creator>ha_dcp2000</Creator>
+\t<ContentVersion>
+\t\t<Id>urn:uuid:{sub("version")}</Id>
+\t\t<LabelText>urn:uuid:{sub("version")}</LabelText>
+\t</ContentVersion>
+\t<PackList>
+\t\t<Pack>
+\t\t\t<Id>urn:uuid:{sub("pack")}</Id>
+\t\t\t<EventList>
+\t\t\t\t<Event>
+\t\t\t\t\t<Id>urn:uuid:{sub("event")}</Id>
+\t\t\t\t\t<ElementList>
+\t\t\t\t\t\t<MainElement>
+\t\t\t\t\t\t\t<Composition>
+\t\t\t\t\t\t\t\t<Id>urn:uuid:{sub("element")}</Id>
+\t\t\t\t\t\t\t\t<CompositionPlaylistId>urn:uuid:{cpl}</CompositionPlaylistId>
+\t\t\t\t\t\t\t\t<AnnotationText>{title}</AnnotationText>
+\t\t\t\t\t\t\t\t<IntrinsicDuration>{int(frames)}</IntrinsicDuration>
+\t\t\t\t\t\t\t\t<EditRate>{rate_a} {rate_b}</EditRate>
+\t\t\t\t\t\t\t</Composition>
+\t\t\t\t\t\t</MainElement>
+\t\t\t\t\t</ElementList>
+\t\t\t\t</Event>
+\t\t\t</EventList>
+\t\t</Pack>
+\t</PackList>
+</ShowPlaylist>
+"""
+    return spl, xml
+
+
 @dataclass(slots=True)
 class ProductInfo:
     name: str

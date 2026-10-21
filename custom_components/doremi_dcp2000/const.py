@@ -8,6 +8,7 @@ DEFAULT_KLV_PORT = 11730
 DEFAULT_SCAN_INTERVAL = 2  # seconds
 DEFAULT_FPS = 24.0
 LIBRARY_REFRESH = 300  # seconds
+CPL_INFO_BATCH = 25  # GetCPLInfo requests per update for CPLs without clip id
 
 CONF_SCAN_INTERVAL = "scan_interval"
 CONF_FPS = "fps"

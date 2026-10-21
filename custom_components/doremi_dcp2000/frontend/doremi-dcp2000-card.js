@@ -9,7 +9,7 @@
  *   show_seek_buttons: false   # jump back / forward by seek_seconds
  *   seek_seconds: 10
  */
-const CARD_VERSION = "0.8.1";
+const CARD_VERSION = "0.9.0";
 
 const TEXT = {
   de: {

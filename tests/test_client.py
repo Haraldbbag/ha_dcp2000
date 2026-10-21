@@ -24,6 +24,20 @@ def test_frames_match_docs():
     assert p.klv_request("StatusSPL", 1)[:16].hex() == "060e2b340205010a0e10010101031b00"  # v2.5 Table 37/38
 
 
+def test_cpl_spl_roundtrip():
+    cpl = "C043D024-08BB-45FB-A72B-83AABBB1828C"
+    spl, xml = p.build_cpl_spl_xml(cpl, "Trailer <A&B>", 2811, (25, 1))
+    assert spl == p.cpl_spl_uuid(cpl.lower()) == p.cpl_spl_uuid(cpl)
+    items = p.parse_spl_xml(xml)
+    assert len(items) == 1
+    item = items[0]
+    assert item["cpl_uuid"] == cpl.lower()
+    assert item["title"] == "Trailer <A&B>"
+    assert item["fps"] == 25 and item["duration"] == 112.44
+    assert item["cues"] == []
+    assert "AutomationCue" not in xml and "Lamp" not in xml
+
+
 async def _scenario():
     st, s1, s2 = await fake_dcp.start("127.0.0.1", 15000, 15730)
     try:
@@ -142,5 +156,6 @@ def test_scenario():
 
 if __name__ == "__main__":
     test_frames_match_docs()
+    test_cpl_spl_roundtrip()
     test_scenario()
     print("all tests passed")
