@@ -107,6 +107,20 @@ def test_soap():
     asyncio.run(_soap_scenario())
 
 
+def test_auth_fault_texts():
+    for text in ("Authentication failed", "authentication failure"):
+        raw = (
+            '<e:Envelope xmlns:e="http://schemas.xmlsoap.org/soap/envelope/"><e:Body><e:Fault>'
+            f"<faultcode>e:Client</faultcode><faultstring>{text}</faultstring></e:Fault></e:Body></e:Envelope>"
+        ).encode()
+        try:
+            s.parse_response(raw, "Login")
+        except s.SoapAuthError:
+            pass
+        else:
+            raise AssertionError(text)
+
+
 def test_envelope():
     env = s.build_envelope("GetScheduleList", [("sessionId", "abc"), ("dateFrom", None), ("x", "<&>")])
     assert b"<v1:GetScheduleList><sessionId>abc</sessionId><x>&lt;&amp;&gt;</x></v1:GetScheduleList>" in env
@@ -237,6 +251,7 @@ def test_server_time_with_zone():
 
 
 if __name__ == "__main__":
+    test_auth_fault_texts()
     test_envelope()
     test_soap()
     test_day_sensors()
