@@ -153,6 +153,7 @@ class DCPCoordinator(DataUpdateCoordinator[DCPData]):
         self._spl_cache: dict[str, dict] = {}  # uuid -> {title, frames}
         self._cpl_cache: dict[str, dict] = {}  # uuid -> {title, kind, frames, rate}
         self.data = DCPData(fps=self.default_fps)
+        self.schedule = None  # ScheduleCoordinator when the show schedule is enabled
 
     async def async_load_cache(self) -> None:
         stored = await self._store.async_load() or {}
@@ -446,6 +447,17 @@ class DCPCoordinator(DataUpdateCoordinator[DCPData]):
             if self._spl_cache.get(uuid, {}).get("title") == name:
                 return uuid
         return name.removeprefix("urn:uuid:")
+
+    def spl_title(self, uuid: str | None) -> str | None:
+        """Plain SPL title (schedule/calendar), None when unknown."""
+        if not uuid:
+            return None
+        uuid = uuid.lower()
+        title = self._spl_cache.get(uuid, {}).get("title")
+        if title:
+            return title
+        label = self.cpl_label_for_spl(uuid)
+        return label.rsplit(" (", 1)[0] if label else None
 
     def spl_label(self, uuid: str | None) -> str | None:
         if not uuid or not self.data:

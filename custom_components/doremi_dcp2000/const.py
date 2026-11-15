@@ -26,3 +26,27 @@ PREVIOUS_THRESHOLD = 3  # s into a clip: "previous" restarts it, below that -> p
 MODE_CINEMA = "cinema"  # jumps only while paused - like the DCP-2000 itself
 MODE_MEDIAPLAYER = "mediaplayer"  # jumps also while playing (pause, jump, play)
 TRANSPORT_MODES = [MODE_CINEMA, MODE_MEDIAPLAYER]
+
+# --- Show schedule (SOAP web services, read only) ---
+CONF_SCHEDULE = "schedule"
+CONF_SOAP_PORT = "soap_port"
+CONF_SOAP_USER = "soap_username"
+CONF_SOAP_PASSWORD = "soap_password"
+CONF_SCHEDULE_INTERVAL = "schedule_interval"  # minutes
+CONF_SCHEDULE_DAYS = "schedule_days"
+CONF_HISTORY_DAYS = "history_days"
+CONF_DAY_START = "day_start_hour"
+CONF_PAUSE_LIMIT = "pause_limit"  # minutes
+CONF_EXTERNAL_PLAYERS = "external_players"
+
+DEFAULT_SOAP_PORT = 10000
+DEFAULT_SOAP_USER = "manager"
+DEFAULT_SOAP_PASSWORD = "password"
+DEFAULT_SCHEDULE_INTERVAL = 5
+DEFAULT_SCHEDULE_DAYS = 14
+DEFAULT_HISTORY_DAYS = 183
+DEFAULT_DAY_START = 4
+DEFAULT_PAUSE_LIMIT = 180
+SCHEDULE_FAIL_TOLERANCE = 3  # failed polls before the schedule entities go unavailable
+SCHEDULE_INFO_BATCH = 30  # GetScheduleInfo requests per poll (new shows first)
+SPL_TITLE_REFRESH = 300  # s between GetSPLListInfo calls for unknown SPLs

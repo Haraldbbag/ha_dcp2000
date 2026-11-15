@@ -16,9 +16,13 @@ from homeassistant.const import PERCENTAGE, EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
+from homeassistant.util import dt as dt_util
+
 from . import protocol as p
 from .coordinator import DCPConfigEntry, DCPCoordinator, DCPData
-from .entity import DCPEntity
+from .entity import DCPEntity, ScheduleEntity
+from .schedule import ScheduleCoordinator
+from .schedule_logic import Show
 
 TRANSPORT_STATES = ["playing", "starting", "paused", "cued", "cueing", "stopped", "ejected"]
 
@@ -137,11 +141,16 @@ async def async_setup_entry(
     hass: HomeAssistant, entry: DCPConfigEntry, async_add_entities: AddConfigEntryEntitiesCallback
 ) -> None:
     c = entry.runtime_data
-    async_add_entities(
+    entities: list[SensorEntity] = [
         DCPSensor(c, desc)
         for desc in SENSORS
         if (not desc.klv_only or c.klv) and (not desc.gpio_only or c.gpio_enabled)
-    )
+    ]
+    if c.schedule is not None:
+        entities += [ScheduleSensor(c.schedule, desc) for desc in SCHEDULE_SENSORS]
+        entities.append(ShowsTodaySensor(c.schedule))
+        entities.append(LastShowStatusSensor(c.schedule))
+    async_add_entities(entities)
 
 
 class DCPSensor(DCPEntity, SensorEntity):
@@ -159,3 +168,135 @@ class DCPSensor(DCPEntity, SensorEntity):
     def extra_state_attributes(self) -> dict[str, Any] | None:
         fn = self.entity_description.attr_fn
         return fn(self.coordinator.data) if fn else None
+
+
+# ----------------------------------------------------------------- schedule
+
+
+@dataclass(frozen=True, kw_only=True)
+class ScheduleSensorDescription(SensorEntityDescription):
+    show_fn: Callable[[ScheduleCoordinator], Show | None]
+    time_fn: Callable[[Show], Any]
+
+
+SCHEDULE_SENSORS: tuple[ScheduleSensorDescription, ...] = (
+    ScheduleSensorDescription(
+        key="first_show_start", translation_key="first_show_start",
+        device_class=SensorDeviceClass.TIMESTAMP,
+        show_fn=lambda c: c.book.first_of_day(dt_util.now(), c.day_start),
+        time_fn=lambda s: s.start,
+    ),
+    ScheduleSensorDescription(
+        key="last_show_end", translation_key="last_show_end",
+        device_class=SensorDeviceClass.TIMESTAMP,
+        show_fn=lambda c: c.book.last_of_day(dt_util.now(), c.day_start),
+        time_fn=lambda s: s.sensor_end,
+    ),
+    ScheduleSensorDescription(
+        key="next_show_start", translation_key="next_show_start",
+        device_class=SensorDeviceClass.TIMESTAMP,
+        show_fn=lambda c: c.book.next_show(dt_util.now()),
+        time_fn=lambda s: s.planned_start,
+    ),
+    ScheduleSensorDescription(
+        key="running_show_end", translation_key="running_show_end",
+        device_class=SensorDeviceClass.TIMESTAMP,
+        show_fn=lambda c: c.book.running_show(),
+        time_fn=lambda s: s.sensor_end,
+    ),
+)
+
+
+class ScheduleSensor(ScheduleEntity, SensorEntity):
+    entity_description: ScheduleSensorDescription
+    tracking = True
+
+    def __init__(self, coordinator: ScheduleCoordinator, desc: ScheduleSensorDescription) -> None:
+        super().__init__(coordinator, desc.key)
+        self.entity_description = desc
+
+    def _show(self) -> Show | None:
+        return self.entity_description.show_fn(self.coordinator)
+
+    @property
+    def native_value(self) -> Any:
+        show = self._show()
+        return self.entity_description.time_fn(show) if show else None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        show = self._show()
+        attrs = show.attrs() if show else {}
+        if self.entity_description.key == "running_show_end" and show:
+            ext, entity = self.coordinator.external_remaining(dt_util.now())
+            attrs["externer_player"] = entity if self.coordinator.book.paused_since else None
+            attrs["pause_seit"] = (
+                self.coordinator.book.paused_since.isoformat() if self.coordinator.book.paused_since else None
+            )
+        return attrs
+
+
+class ShowsTodaySensor(ScheduleEntity, SensorEntity):
+    """Number of shows of the show day; list only of this day (keeps the database small)."""
+
+    _attr_translation_key = "shows_today"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    tracking = True
+
+    def __init__(self, coordinator: ScheduleCoordinator) -> None:
+        super().__init__(coordinator, "shows_today")
+
+    def _shows(self) -> list[Show]:
+        return self.coordinator.book.day_shows(dt_util.now(), self.coordinator.day_start)
+
+    @property
+    def native_value(self) -> int:
+        return len(self._shows())
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return {
+            "liste": [
+                {
+                    "beginn": dt_util.as_local(s.start).strftime("%H:%M"),
+                    "ende": dt_util.as_local(s.sensor_end).strftime("%H:%M"),
+                    "titel": s.summary(),
+                    "dauer": p.format_hms(int((s.end - s.start).total_seconds())),
+                    "status": s.status if not s.manual else None,
+                    "quelle": s.source(),
+                    "laeuft": s.running,
+                    "abgebrochen": s.aborted,
+                }
+                for s in self._shows()
+            ],
+            "scheduler": self.coordinator.data.scheduler_status,
+        }
+
+
+class LastShowStatusSensor(ScheduleEntity, SensorEntity):
+    _attr_translation_key = "last_show_status"
+    _attr_device_class = SensorDeviceClass.ENUM
+    _attr_options = ["success", "failure", "aborted", "unknown"]
+
+    def __init__(self, coordinator: ScheduleCoordinator) -> None:
+        super().__init__(coordinator, "last_show_status")
+
+    def _show(self) -> Show | None:
+        return self.coordinator.book.last_finished(dt_util.now())
+
+    @property
+    def native_value(self) -> str | None:
+        show = self._show()
+        if not show:
+            return None
+        if show.aborted:
+            return "aborted"
+        status = (show.status or "").lower()
+        if status in ("success", "failure", "aborted"):
+            return status
+        return "success" if show.finished else "unknown"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        show = self._show()
+        return show.attrs() if show else None

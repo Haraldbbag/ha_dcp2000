@@ -71,11 +71,35 @@
       },
       "spl_content": {
         "default": "mdi:format-list-numbered"
+      },
+      "first_show_start": {
+        "default": "mdi:clock-start"
+      },
+      "last_show_end": {
+        "default": "mdi:clock-end"
+      },
+      "next_show_start": {
+        "default": "mdi:calendar-arrow-right"
+      },
+      "running_show_end": {
+        "default": "mdi:timer-sand"
+      },
+      "shows_today": {
+        "default": "mdi:calendar-today"
+      },
+      "last_show_status": {
+        "default": "mdi:calendar-check"
       }
     },
     "binary_sensor": {
       "gpi": {
         "default": "mdi:electric-switch"
+      },
+      "scheduler": {
+        "default": "mdi:calendar-remove",
+        "state": {
+          "on": "mdi:calendar-sync"
+        }
       }
     },
     "switch": {
@@ -93,6 +117,11 @@
           "cinema": "mdi:lock",
           "mediaplayer": "mdi:lock-open-variant"
         }
+      }
+    },
+    "calendar": {
+      "schedule": {
+        "default": "mdi:calendar-clock"
       }
     }
   },
@@ -153,6 +182,9 @@
     },
     "step_frames": {
       "service": "mdi:step-forward"
+    },
+    "get_schedule": {
+      "service": "mdi:calendar-search"
     }
   }
 }

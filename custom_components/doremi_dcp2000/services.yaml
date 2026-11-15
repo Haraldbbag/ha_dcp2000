@@ -268,3 +268,9 @@ get_library:
     entity:
       integration: doremi_dcp2000
       domain: media_player
+
+get_schedule:
+  target:
+    entity:
+      integration: doremi_dcp2000
+      domain: calendar
