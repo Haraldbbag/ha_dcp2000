@@ -41,6 +41,14 @@ erkannt; doppelte Einrichtung wird abgelehnt. IP-Wechsel: **⋮ → Neu konfigur
 | GPIO-Entitäten | aus | 8 GPI-Binärsensoren + 8 GPO-Schalter + GPI-Byte |
 | CPL/SPL-API (KLV) | aus | SPL-Steuerung, CPL-Titel in der Quellenliste, echte Bildrate |
 | KLV-Port | 11730 | Wird beim Speichern getestet |
+| Spielplan lesen (Scheduler) | aus (neu eingerichtet: an) | Spielplan über die SOAP-Web-Services, siehe unten |
+| Port / Benutzer / Passwort Web-Services | 10000 / manager / password | Wird beim Speichern getestet (Login + GetSchedulerStatus) |
+| Abfrageintervall Spielplan | 5 Min. | Abfrage des Schedulers |
+| Tage im Voraus | 14 | Zeitraum der Abfrage |
+| Gelaufene Vorstellungen behalten | 183 Tage | Verlauf in `.storage` |
+| Spieltag beginnt um | 4 Uhr | Spätvorstellungen nach Mitternacht zählen zum Vortag |
+| Pause gilt als Ende nach | 180 Min. | Notbremse für eine vergessene Playlist |
+| Externe Player | – | Optional, geordnete Liste, erster spielender gilt |
 
 ## Entitäten
 
@@ -230,6 +238,50 @@ logger:
     custom_components.doremi_dcp2000: debug
 ```
 
+## Spielplan (Scheduler, ab 0.10.0)
+
+Liest den Scheduler des Servers über die Doremi-SOAP-Web-Services
+(`http://<server>:10000/dc/dcp/ws/v1/…`). **Nur lesend:** erlaubt sind nur
+`Login`, `Logout`, `WhoAmI`, `GetScheduleList`, `GetScheduleInfo`,
+`GetSchedulerStatus`, `GetSPLListInfo` und `GetSPLInfo`. Alle anderen Aufrufe
+(Vorstellungen anlegen/löschen, Scheduler starten/stoppen, ShowControl,
+Projektor) weist der Client ab, bevor etwas gesendet wird.
+
+Zusätzlich verfolgt die Integration über den KLV-Status, was wirklich läuft:
+
+- Start auf Play: passt eine geplante Vorstellung mit derselben SPL (±15 Min.),
+  wird sie als laufend markiert; sonst entsteht ein Termin „Handstart: Titel“.
+- Voraussichtliches Ende = jetzt + Restlaufzeit der SPL, laufend nachgeführt,
+  auch während einer Pause. Steht der Server auf Pause und spielt ein
+  externer Player der Liste, wird dessen Restzeit addiert.
+- Ende bei Stop oder Eject (echte Zeit; deutlich vor dem erwarteten Ende =
+  „abgebrochen“). Eine Pause länger als das Pausen-Zeitlimit beendet die
+  Vorstellung ebenfalls: im Kalender am Beginn der Pause, in den Sensoren zum
+  Zeitpunkt des Zeitlimits (damit Zeit-Trigger noch auslösen), Attribut
+  `quelle` = `pause_zeitlimit`.
+
+| Entität | Inhalt |
+|---|---|
+| `calendar.<gerät>_spielplan` | geplante und gelaufene Vorstellungen (Verlauf über die eingestellte Zeit) |
+| `sensor.<gerät>_beginn_erste_vorstellung` | Beginn der ersten Vorstellung des Spieltags |
+| `sensor.<gerät>_ende_letzte_vorstellung` | Ende der letzten Vorstellung des Spieltags (geplant → voraussichtlich → tatsächlich) |
+| `sensor.<gerät>_beginn_nachste_vorstellung` | Beginn der nächsten noch nicht gestarteten Vorstellung |
+| `sensor.<gerät>_ende_laufende_vorstellung` | voraussichtliches Ende der laufenden Vorstellung |
+| `sensor.<gerät>_vorstellungen_heute` | Anzahl, Attribut `liste` (nur der Spieltag) |
+| `sensor.<gerät>_letzte_vorstellung_status` | Erfolgreich / Fehlgeschlagen / Abgebrochen |
+| `binary_sensor.<gerät>_scheduler` | Scheduler läuft |
+
+Die Zeit-Sensoren haben das Attribut `quelle` (`geplant`, `voraussichtlich`,
+`tatsaechlich`, `pause_zeitlimit`) und Titel, Beginn, Ende, Schedule-ID.
+Die Integration arbeitet nur auf Serverebene; Werte für ein ganzes Haus als
+Template-Sensor bilden. Die Aktion `doremi_dcp2000.get_schedule` (Ziel: der
+Kalender) liefert die Rohdaten des Servers zum Prüfen.
+
+Fehler: Server nicht erreichbar → die letzten Daten bleiben für 3 Abfragen,
+dann „nicht verfügbar“ (die Kalender- und Zeit-Sensoren aus der Verfolgung
+bleiben). Login abgelehnt → keine weiteren Versuche, HA fragt Benutzer und
+Passwort neu ab.
+
 ## Testen ohne Server
 
 `tests/fake_dcp.py` simuliert einen DCP-2000 (Port 5000 + KLV 11730):
@@ -237,4 +289,6 @@ logger:
 ```bash
 python3 tests/fake_dcp.py 0.0.0.0     # dann in HA die IP dieses Rechners eintragen
 python3 tests/test_client.py          # Protokoll-Tests
+python3 tests/fake_soap.py 0.0.0.0    # Web-Services/Scheduler (Port 10000, braucht aiohttp)
+python3 tests/test_schedule.py        # Spielplan-Tests (braucht aiohttp)
 ```

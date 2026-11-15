@@ -11,16 +11,34 @@ from homeassistant.const import CONF_HOST, CONF_PORT, Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.typing import ConfigType
 from homeassistant.loader import async_get_integration
 
 from .client import DCP2000Client, DCPError, KLVClient
-from .const import DOMAIN, CONF_KLV, CONF_KLV_PORT, CONF_KLV_REG, DEFAULT_KLV_PORT, DEFAULT_PORT
+from .const import (
+    CONF_KLV,
+    CONF_KLV_PORT,
+    CONF_KLV_REG,
+    CONF_SCHEDULE,
+    CONF_SOAP_PASSWORD,
+    CONF_SOAP_PORT,
+    CONF_SOAP_USER,
+    DEFAULT_KLV_PORT,
+    DEFAULT_PORT,
+    DEFAULT_SOAP_PASSWORD,
+    DEFAULT_SOAP_PORT,
+    DEFAULT_SOAP_USER,
+    DOMAIN,
+)
 from .coordinator import DCPConfigEntry, DCPCoordinator
+from .schedule import ScheduleCoordinator
+from .soap import DoremiSoapClient
 
 PLATFORMS = [
     Platform.BINARY_SENSOR,
     Platform.BUTTON,
+    Platform.CALENDAR,
     Platform.MEDIA_PLAYER,
     Platform.SELECT,
     Platform.SENSOR,
@@ -92,6 +110,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: DCPConfigEntry) -> bool:
     await coordinator.async_config_entry_first_refresh()
     entry.runtime_data = coordinator
 
+    if entry.options.get(CONF_SCHEDULE, False):
+        soap = DoremiSoapClient(
+            async_get_clientsession(hass),
+            host,
+            entry.options.get(CONF_SOAP_PORT, DEFAULT_SOAP_PORT),
+            entry.options.get(CONF_SOAP_USER, DEFAULT_SOAP_USER),
+            entry.options.get(CONF_SOAP_PASSWORD, DEFAULT_SOAP_PASSWORD),
+        )
+        schedule = ScheduleCoordinator(hass, entry, coordinator, soap)
+        await schedule.async_load()
+        coordinator.schedule = schedule
+        # Not first_refresh: an unreachable scheduler must not block the server control.
+        await schedule.async_refresh()
+
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     entry.async_on_unload(entry.add_update_listener(_async_reload))
     return True
@@ -100,6 +132,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: DCPConfigEntry) -> bool:
 async def async_unload_entry(hass: HomeAssistant, entry: DCPConfigEntry) -> bool:
     unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unloaded:
+        if entry.runtime_data.schedule is not None:
+            await entry.runtime_data.schedule.async_shutdown()
         await entry.runtime_data.async_shutdown()
     return unloaded
 

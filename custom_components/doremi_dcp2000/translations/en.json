@@ -7,7 +7,13 @@
         "data": {
           "host": "Host",
           "port": "Port",
-          "name": "Name (e.g. Kino 1)"
+          "name": "Name (e.g. Kino 1)",
+          "schedule": "Read show schedule (scheduler)",
+          "soap_username": "Web-services user",
+          "soap_password": "Web-services password"
+        },
+        "data_description": {
+          "schedule": "Read-only access to the server's scheduler via the SOAP web services (port 10000). Default user: manager / password."
         }
       },
       "reconfigure": {
@@ -16,15 +22,26 @@
           "host": "Host",
           "port": "Port"
         }
+      },
+      "reauth_confirm": {
+        "title": "Web-services login",
+        "description": "The server refused the login for the show schedule. Enter user and password again.",
+        "data": {
+          "soap_username": "User",
+          "soap_password": "Password"
+        }
       }
     },
     "error": {
-      "cannot_connect": "Cannot connect to the server."
+      "cannot_connect": "Cannot connect to the server.",
+      "soap_auth": "Login refused (user or password wrong).",
+      "soap_failed": "The web services (port 10000) did not answer or do not offer the scheduler."
     },
     "abort": {
       "already_configured": "This server is already configured.",
       "reconfigure_successful": "Connection updated.",
-      "wrong_device": "This is a different server (serial number differs)."
+      "wrong_device": "This is a different server (serial number differs).",
+      "reauth_successful": "Login updated."
     }
   },
   "options": {
@@ -36,16 +53,32 @@
           "fps": "Default frame rate",
           "gpio": "GPIO entities (8 inputs/8 outputs)",
           "klv": "Enable CPL/SPL API (KLV)",
-          "klv_port": "KLV port"
+          "klv_port": "KLV port",
+          "schedule": "Read show schedule (scheduler)",
+          "soap_port": "Web-services port",
+          "soap_username": "Web-services user",
+          "soap_password": "Web-services password",
+          "schedule_interval": "Schedule poll interval (min)",
+          "schedule_days": "Days ahead",
+          "history_days": "Keep past shows (days)",
+          "day_start_hour": "Show day starts at (hour)",
+          "pause_limit": "Pause counts as end after (min)",
+          "external_players": "External players (first playing counts)"
         },
         "data_description": {
           "fps": "Used when the frame rate cannot be read from the CPL (needs KLV).",
-          "klv": "DCP-2000 Messages API on port 11730: exact frame rates and titles for all CPLs, SPL control. Tested when saving."
+          "klv": "DCP-2000 Messages API on port 11730: exact frame rates and titles for all CPLs, SPL control. Tested when saving.",
+          "schedule": "Read only: GetScheduleList / GetScheduleInfo / GetSchedulerStatus / GetSPLListInfo. Tested when saving.",
+          "day_start_hour": "Late shows after midnight count to the previous day until this hour.",
+          "pause_limit": "A show ends on stop/eject. Only a pause longer than this counts as end (forgotten playlist).",
+          "external_players": "Optional. Blu-ray/Apple TV players or sensors with the remaining time in seconds. While the server pauses, the remaining time of the first playing one is added to the expected end."
         }
       }
     },
     "error": {
-      "klv_unreachable": "The KLV API did not answer on this port."
+      "klv_unreachable": "The KLV API did not answer on this port.",
+      "soap_auth": "Login refused (user or password wrong).",
+      "soap_failed": "The web services (port 10000) did not answer or do not offer the scheduler."
     }
   },
   "entity": {
@@ -127,6 +160,30 @@
       },
       "spl_content": {
         "name": "SPL current event"
+      },
+      "first_show_start": {
+        "name": "Beginn erste Vorstellung"
+      },
+      "last_show_end": {
+        "name": "Ende letzte Vorstellung"
+      },
+      "next_show_start": {
+        "name": "Beginn nächste Vorstellung"
+      },
+      "running_show_end": {
+        "name": "Ende laufende Vorstellung"
+      },
+      "shows_today": {
+        "name": "Vorstellungen heute"
+      },
+      "last_show_status": {
+        "name": "Letzte Vorstellung Status",
+        "state": {
+          "success": "Success",
+          "failure": "Failure",
+          "aborted": "Aborted",
+          "unknown": "Unknown"
+        }
       }
     },
     "binary_sensor": {
@@ -135,6 +192,9 @@
       },
       "gpi": {
         "name": "GPI {line}"
+      },
+      "scheduler": {
+        "name": "Scheduler"
       }
     },
     "switch": {
@@ -184,6 +244,11 @@
           "cinema": "Cinema",
           "mediaplayer": "Mediaplayer"
         }
+      }
+    },
+    "calendar": {
+      "schedule": {
+        "name": "Spielplan"
       }
     }
   },
@@ -412,6 +477,10 @@
           "description": "Positive = forward."
         }
       }
+    },
+    "get_schedule": {
+      "name": "Get schedule",
+      "description": "Raw scheduler answers of the server and the tracking state (read only, for checks)."
     }
   },
   "exceptions": {
