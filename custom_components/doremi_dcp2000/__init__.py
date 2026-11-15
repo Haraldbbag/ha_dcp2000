@@ -125,7 +125,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: DCPConfigEntry) -> bool:
         await schedule.async_refresh()
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-    entry.async_on_unload(entry.add_update_listener(_async_reload))
     return True
 
 
@@ -136,7 +135,3 @@ async def async_unload_entry(hass: HomeAssistant, entry: DCPConfigEntry) -> bool
             await entry.runtime_data.schedule.async_shutdown()
         await entry.runtime_data.async_shutdown()
     return unloaded
-
-
-async def _async_reload(hass: HomeAssistant, entry: DCPConfigEntry) -> None:
-    await hass.config_entries.async_reload(entry.entry_id)

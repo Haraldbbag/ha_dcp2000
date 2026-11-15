@@ -110,7 +110,7 @@ def parse_response(raw: bytes, operation: str) -> ET.Element:
             low = fault.lower()
             if "not authenticated" in low:
                 raise SoapNotAuthenticated(fault)
-            if "authentication failed" in low:
+            if "authentication fail" in low:  # IMS: "failed", DCP2000: "failure"
                 raise SoapAuthError(fault)
             raise SoapFault(fault)
         if name == f"{operation}Response":
